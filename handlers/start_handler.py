@@ -1,9 +1,13 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler
 
+from handlers.socialmedia_handler import SocialMediaHandler
 from handlers.manager_handler import ManagerHandler
 from handlers.base_handler import BaseHandler
 from handlers.support_handler import SupportHandler
+
+
+
 
 
 class StartHandler(BaseHandler):
@@ -12,6 +16,7 @@ class StartHandler(BaseHandler):
         app.add_handler(CommandHandler('start', cls.callback))
         button_handler.register_callback('support', SupportHandler.callback)
         button_handler.register_callback('FAQ', ManagerHandler.callback)
+        button_handler.register_callback('socmed', SocialMediaHandler.callback)
 
     @staticmethod
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -19,7 +24,9 @@ class StartHandler(BaseHandler):
             [InlineKeyboardButton('Переглянути тварин 🐶', callback_data='watchpet')],
             [
                 InlineKeyboardButton('Підтримати нас 💵❤️', callback_data='support'),
-                InlineKeyboardButton("Зв'язатися з нами ☎️", callback_data='FAQ')]
+                InlineKeyboardButton("Зв'язатися з нами ☎️", callback_data='FAQ'),
+            ],
+            [InlineKeyboardButton("Наші соціальні мережі 📢", callback_data='socmed')]
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
