@@ -22,6 +22,12 @@ class SupportHandler(BaseHandler):
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 
+        if update.callback_query:
+            await context.bot.delete_message(
+                chat_id=update.callback_query.message.chat_id,
+                message_id=update.callback_query.message.message_id
+            )
+
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Виберіть будь ласка ваш банк яким збираєтесь оплачувати",

@@ -1,6 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
+
 from handlers.base_handler import BaseHandler
 
 
@@ -9,6 +10,7 @@ class ManagerHandler(BaseHandler):
     def register(cls, app, button_handler):
         # Реєструємо тільки callback без створення нового CallbackQueryHandler
         button_handler.register_callback('FAQ', cls.callback)
+        button_handler.register_callback('menu', cls.callback)
 
     @staticmethod
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

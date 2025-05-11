@@ -1,14 +1,15 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, CallbackQueryHandler
+from telegram.ext import ContextTypes
+
 
 from handlers.base_handler import BaseHandler
-from keyboards.callback_handler import ButtonCallbackHandler
 
 
 class MonobankHandler(BaseHandler):
     @classmethod
     def register(cls, app, button_handler):
         # Реєструємо тільки callback без створення нового CallbackQueryHandler
+        button_handler.register_callback('menu', cls.callback)
         button_handler.register_callback('mono', cls.callback)
 
     @staticmethod
@@ -18,6 +19,12 @@ class MonobankHandler(BaseHandler):
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if update.callback_query:
+            await context.bot.delete_message(
+                chat_id=update.callback_query.message.chat_id,
+                message_id=update.callback_query.message.message_id
+            )
 
         await context.bot.send_message(
             chat_id=update.effective_chat.id,

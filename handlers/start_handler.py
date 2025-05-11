@@ -10,10 +10,17 @@ from handlers.support_handler import SupportHandler
 class StartHandler(BaseHandler):
     @classmethod
     def register(cls, app, button_handler):
+
         app.add_handler(CommandHandler('start', cls.callback))
+
         button_handler.register_callback('support', SupportHandler.callback)
         button_handler.register_callback('FAQ', ManagerHandler.callback)
         button_handler.register_callback('socmed', SocialMediaHandler.callback)
+        button_handler.register_callback('menu', cls.callback)
+
+
+
+
 
     @staticmethod
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -27,6 +34,12 @@ class StartHandler(BaseHandler):
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if update.callback_query:
+            await context.bot.delete_message(
+                chat_id=update.callback_query.message.chat_id,
+                message_id=update.callback_query.message.message_id
+            )
 
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
