@@ -7,9 +7,6 @@ from handlers.base_handler import BaseHandler
 from handlers.support_handler import SupportHandler
 
 
-
-
-
 class StartHandler(BaseHandler):
     @classmethod
     def register(cls, app, button_handler):

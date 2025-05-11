@@ -18,7 +18,6 @@ class SupportHandler(BaseHandler):
         keyboard = [
             [InlineKeyboardButton('Monobank', callback_data='mono')],
             [InlineKeyboardButton('Privat24', callback_data='privat')],
-            [InlineKeyboardButton("Pumb", callback_data='pumb')]
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
