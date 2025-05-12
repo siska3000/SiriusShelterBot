@@ -1,6 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler
 
+from handlers.pet_handler import PetHandler
 from handlers.socialmedia_handler import SocialMediaHandler
 from handlers.manager_handler import ManagerHandler
 from handlers.base_handler import BaseHandler
@@ -16,11 +17,8 @@ class StartHandler(BaseHandler):
         button_handler.register_callback('support', SupportHandler.callback)
         button_handler.register_callback('FAQ', ManagerHandler.callback)
         button_handler.register_callback('socmed', SocialMediaHandler.callback)
+        button_handler.register_callback('watchpet', PetHandler.callback)
         button_handler.register_callback('menu', cls.callback)
-
-
-
-
 
     @staticmethod
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
