@@ -34,7 +34,7 @@ class PrevPetHandler(BaseHandler):
         context.user_data["pet_index"] = prev_index
         pet = df.iloc[prev_index]
 
-    pet_data = f"Ім'я: {pet['Name']}\nВік: {pet['Age']} років\n`{pet['MyStory']}`\n {pet['PhotoURL']}"
+        pet_data = f"Ім'я: {pet['Name']}\nВік: {pet['Age']} років\n`{pet['MyStory']}`\n {pet['PhotoURL']}"
 
         keyboard = [
             [
