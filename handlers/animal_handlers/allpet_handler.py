@@ -1,21 +1,21 @@
-import pandas as pd
 import gspread
+import pandas as pd
+import requests
+from io import BytesIO
 from gspread_dataframe import get_as_dataframe
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+
+from handlers.givefamily_handler import GiveFamilyHandler
 from handlers.base_handler import BaseHandler
-import random  # Для випадкового вибору
 
 
 class AllpetHandler(BaseHandler):
     @classmethod
     def register(cls, app, button_handler):
-        # Реєструємо callback'и для відповідних кнопок
         button_handler.register_callback('allpets', cls.callback)
-        # button_handler.register_callback('menu', cls.callback)
-        # button_handler.register_callback('next', cls.callback)
-        # button_handler.register_callback('prev', cls.callback)
+        button_handler.register_callback('givefamily', GiveFamilyHandler.start_conversation)
 
     @staticmethod
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -50,33 +50,51 @@ class AllpetHandler(BaseHandler):
         pet_age = random_pet['Age']
         pet_image_url = random_pet['PhotoURL']  # Посилання на фото
 
-        # Форматування даних
-        pet_data = f"Ім'я: {pet_name}\nВік: {pet_age} років\n`{pet_story}`\n {pet_image_url}"
+        # Якщо MyStory NaN, замінюємо його на дефолтне значення
+        if pd.isna(pet_story):
+            pet_story = "Історія не доступна."
 
-        # Створюємо клавіатуру для навігації
-        keyboard = [
-            [
-                InlineKeyboardButton('<<', callback_data='prev'),
-                InlineKeyboardButton('Забрати', callback_data='choose'),
-                InlineKeyboardButton('>>', callback_data='next')
-            ],
-            [InlineKeyboardButton('У головне меню', callback_data='menu')],
-        ]
+        # Скачування зображення
+        try:
+            image_response = requests.get(pet_image_url)
+            image_response.raise_for_status()  # Перевірка на помилки запиту
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+            # Якщо все гаразд, збережемо зображення у пам'яті
+            image = BytesIO(image_response.content)
+            image.name = 'pet_image.jpg'  # Ім'я файлу (можна змінити за потреби)
 
-        if update.callback_query:
-            await context.bot.delete_message(
-                chat_id=update.callback_query.message.chat_id,
-                message_id=update.callback_query.message.message_id
+            # Форматування даних
+            caption = f"Ім'я: {pet_name}\nВік: {pet_age} \n`{pet_story}`"
+
+            # Створюємо клавіатуру для навігації
+            keyboard = [
+                [
+                    InlineKeyboardButton('<<', callback_data='prev'),
+                    InlineKeyboardButton("Подарувати сім`ю", callback_data='givefamily'),
+                    InlineKeyboardButton('>>', callback_data='next')
+                ],
+                [InlineKeyboardButton('У головне меню', callback_data='menu')],
+            ]
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            if update.callback_query:
+                await context.bot.delete_message(
+                    chat_id=update.callback_query.message.chat_id,
+                    message_id=update.callback_query.message.message_id
+                )
+
+            # Відправка фото з підписом
+            await context.bot.send_photo(
+                chat_id=update.effective_chat.id,
+                photo=image,  # Надсилаємо зображення з пам'яті
+                caption=caption,
+                parse_mode='Markdown',
+                reply_markup=reply_markup
             )
 
-        # Відправляємо користувачу повідомлення з даними
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"Ось випадкова тварина:\n\n{pet_data}\n",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-
-
+        except requests.exceptions.RequestException as e:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"Помилка при скачуванні зображення: {e}",
+            )

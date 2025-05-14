@@ -7,6 +7,7 @@ from .pet_handler import PetHandler
 import handlers.animal_handlers
 from .prev_pet import PrevPetHandler
 from .next_pet import NextPetHandler
+from .givefamily_handler import GiveFamilyHandler
 
 
 
