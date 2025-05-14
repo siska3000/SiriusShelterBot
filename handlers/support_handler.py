@@ -16,8 +16,10 @@ class SupportHandler(BaseHandler):
     @staticmethod
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
-            [InlineKeyboardButton('Monobank', callback_data='mono')],
-            [InlineKeyboardButton('Privat24', callback_data='privat')],
+            [InlineKeyboardButton('Monobank', callback_data='mono'),
+             InlineKeyboardButton('Privat24', callback_data='privat')],
+            [InlineKeyboardButton('Назад', callback_data='support')],
+
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
