@@ -1,14 +1,20 @@
+import re
+from io import BytesIO
+
 import gspread
 import pandas as pd
 import requests
-from io import BytesIO
 from gspread_dataframe import get_as_dataframe
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from handlers.givefamily_handler import GiveFamilyHandler
 from handlers.base_handler import BaseHandler
+from handlers.givefamily_handler import GiveFamilyHandler
+
+
+def escape_markdown_v2(text: str) -> str:
+    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
 
 
 class CatHandler(BaseHandler):
@@ -27,48 +33,54 @@ class CatHandler(BaseHandler):
 
         # 2. Підключення до таблиці по ключу
         spreadsheet = client.open_by_key("1bwx4LsiH2IFAxvQlZG3skYQSt_zti1yrynRfXlhwlPg")
-        worksheet = spreadsheet.sheet1  # або назва аркуша: spreadsheet.worksheet("Назва аркуша")
+        worksheet = spreadsheet.sheet1
 
         # 3. Зчитування у pandas DataFrame
         df1 = get_as_dataframe(worksheet, evaluate_formulas=True)
 
-        # Перевірка назв стовпців
-        print("Стовпці таблиці:", df1.columns)  # Друк назв стовпців
+        print("Стовпці таблиці:", df1.columns)
 
-        # Перевірка наявності необхідних стовпців
-        if 'Name' not in df1.columns or 'Age' not in df1.columns or 'PhotoURL' not in df1.columns:
+        required_columns = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Species', 'Size', 'SkillsAndCharacter']
+        missing_columns = [col for col in required_columns if col not in df1.columns]
+        if missing_columns:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="У таблиці відсутні необхідні стовпці: Name, Age або PhotoURL.",
+                text=f"У таблиці відсутні необхідні стовпці: {', '.join(missing_columns)}.",
             )
             return
 
         df = df1[df1['Species'] == 'Кіт']
 
-        # Вибір випадкової тварини
-        random_pet = df.sample(n=1).iloc[0]  # Вибираємо одну випадкову тварину
+        random_pet = df.sample(n=1).iloc[0]
         pet_name = random_pet['Name']
-        pet_story = random_pet['MyStory']
         pet_age = random_pet['Age']
-        pet_image_url = random_pet['PhotoURL']  # Посилання на фото
+        pet_size = random_pet['Size']
+        pet_skills_character = random_pet['SkillsAndCharacter']
+        pet_story = random_pet['MyStory']
+        pet_image_url = random_pet['PhotoURL']
 
-        # Якщо MyStory NaN, замінюємо його на дефолтне значення
         if pd.isna(pet_story):
             pet_story = "Історія не доступна."
+        if pd.isna(pet_size):
+            pet_size = "Невідомо"
+        if pd.isna(pet_skills_character):
+            pet_skills_character = "Не вказано"
 
-        # Скачування зображення
         try:
             image_response = requests.get(pet_image_url)
-            image_response.raise_for_status()  # Перевірка на помилки запиту
+            image_response.raise_for_status()
 
-            # Якщо все гаразд, збережемо зображення у пам'яті
             image = BytesIO(image_response.content)
-            image.name = 'pet_image.jpg'  # Ім'я файлу (можна змінити за потреби)
+            image.name = 'pet_image.jpg'
 
-            # Форматування даних
-            caption = f"Ім'я: {pet_name}\nВік: {pet_age} \n`{pet_story}`"
+            caption = (
+                f"Ім'я: {escape_markdown_v2(str(pet_name))}\n"
+                f"Вік: {escape_markdown_v2(str(pet_age))}\n"
+                f"Розмір: {escape_markdown_v2(str(pet_size))}\n"
+                f"Навички та характер: {escape_markdown_v2(str(pet_skills_character))}\n\n"
+                f"Моя історія:\n> {escape_markdown_v2(str(pet_story))}"
+            )
 
-            # Створюємо клавіатуру для навігації
             keyboard = [
                 [
                     InlineKeyboardButton('<<', callback_data='prev'),
@@ -77,7 +89,6 @@ class CatHandler(BaseHandler):
                 ],
                 [InlineKeyboardButton('У головне меню', callback_data='menu')],
             ]
-
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             if update.callback_query:
@@ -86,12 +97,11 @@ class CatHandler(BaseHandler):
                     message_id=update.callback_query.message.message_id
                 )
 
-            # Відправка фото з підписом
             await context.bot.send_photo(
                 chat_id=update.effective_chat.id,
-                photo=image,  # Надсилаємо зображення з пам'яті
+                photo=image,
                 caption=caption,
-                parse_mode='Markdown',
+                parse_mode='MarkdownV2',
                 reply_markup=reply_markup
             )
 
