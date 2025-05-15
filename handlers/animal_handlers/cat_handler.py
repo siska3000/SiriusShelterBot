@@ -91,7 +91,7 @@ class CatHandler(BaseHandler):
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            if update.callback_query:
+            if update.callback_query and update.callback_query.data != 'givefamily':
                 await context.bot.delete_message(
                     chat_id=update.callback_query.message.chat_id,
                     message_id=update.callback_query.message.message_id

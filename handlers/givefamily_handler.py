@@ -59,14 +59,6 @@ class GiveFamilyHandler(BaseHandler):
 
     @staticmethod
     async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        query = update.callback_query
-        await query.answer()
-
-        try:
-            if query.message:
-                await query.message.delete()
-        except Exception as e:
-            logger.warning(f"Couldn't delete message: {e}")
 
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -236,8 +228,7 @@ class GiveFamilyHandler(BaseHandler):
 
             summary = (
                 f"✅ Дані успішно збережено!\n\n"
-                f"📋 Переглянути таблицю:\n"
-                f"{GiveFamilyHandler.SHEET_LINK}\n\n"
+                f"\n"
                 f"📧 Емейл: {data[0]}\n"
                 f"📞 Телефон: {data[1]}\n"
                 f"👤 Ім'я: {data[2]}\n"
