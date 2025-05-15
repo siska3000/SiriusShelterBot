@@ -1,6 +1,6 @@
 import re
 import logging
-from telegram import Update
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import (
     ContextTypes,
     ConversationHandler,
@@ -42,8 +42,11 @@ class GiveFamilyHandler(BaseHandler):
                 CallbackQueryHandler(cls.start_conversation, pattern='^givefamily$')
             ],
             states={
-                EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, cls.get_email)],
-                PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cls.get_phone)],
+                EMAIL: [MessageHandler(filters.TEXT & ~filters.CONTACT, cls.get_email)],
+                PHONE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, cls.get_phone),
+                    MessageHandler(filters.CONTACT, cls.get_phone)
+                ],
                 FIRST_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, cls.get_first_name)],
                 LAST_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, cls.get_last_name)],
                 COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, cls.get_comment)],
@@ -158,23 +161,40 @@ class GiveFamilyHandler(BaseHandler):
             return EMAIL
 
         context.user_data['email'] = email
-        await update.message.reply_text("📞 Введіть ваш номер телефону (наприклад, +380XXXXXXXXX або 0XXXXXXXXX):")
+        # await update.message.reply_text("📞 Введіть ваш номер телефону (наприклад, +380XXXXXXXXX або 0XXXXXXXXX):")
+        keyboard = [
+            [KeyboardButton('Share my contact', request_contact=True)]
+        ]
+
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="📞 Введіть ваш номер телефону (наприклад, +380XXXXXXXXX або 0XXXXXXXXX):",
+            reply_markup=reply_markup
+        )
+
+        # await (
+        #     chat_id=update.effective_chat.id,
+        #     text="I'm a bot, please talk to me!",
+        #     reply_markup=reply_markup
+        # )
+        print(update.message.text)
+
         return PHONE
 
     @staticmethod
     async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        phone = update.message.text.strip()
+        # Перевіряємо, чи це контакт
+        if update.message.contact:
+            phone = update.message.contact.phone_number
+        else:
+            phone = update.message.text.strip()
 
-        if not re.match(r"^(?:\+380|380|0)\d{9}$", phone):
-            await update.message.reply_text(
-                "❌ Невірний формат номеру. Приклад: +380XXXXXXXXX або 0XXXXXXXXX. Спробуйте ще раз:")
+        # Проста перевірка номеру (можна додати більш строгу валідацію)
+        if not phone:
+            await update.message.reply_text("❌ Будь ласка, введіть номер телефону або надішліть контакт")
             return PHONE
-
-        # Normalize phone number
-        if phone.startswith('0'):
-            phone = '+38' + phone
-        elif phone.startswith('380'):
-            phone = '+' + phone
 
         context.user_data['phone'] = phone
         await update.message.reply_text("👤 Введіть ваше ім'я:")
