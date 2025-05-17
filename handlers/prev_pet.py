@@ -8,23 +8,28 @@ from gspread_dataframe import get_as_dataframe
 from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+import logging # Додано логування
 
 from handlers.base_handler import BaseHandler
 from handlers.givefamily_handler import GiveFamilyHandler
 
+logger = logging.getLogger(__name__) # Ініціалізація логера
+
 
 def is_image_url_valid(url):
     try:
-        response = requests.get(url)
-        return response.status_code == 200 and 'image' in response.headers['Content-Type']
+        # Додано timeout та перевірку status_code та content-type
+        response = requests.head(url, timeout=5) # Використовуємо HEAD запит, він швидший
+        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+        return 'image' in response.headers.get('Content-Type', '').lower()
     except requests.exceptions.RequestException as e:
-        print(f"Помилка при перевірці URL: {e}")
+        logger.error(f"Помилка при перевірці URL зображення: {e}")
         return False
 
 
 def escape_markdown_v2(text: str) -> str:
     # Екранує спецсимволи MarkdownV2
-    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
+    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text)) # Додано str()
 
 
 class PrevPetHandler(BaseHandler):
@@ -39,29 +44,41 @@ class PrevPetHandler(BaseHandler):
         creds = ServiceAccountCredentials.from_json_keyfile_name("sirius_key (2).json", scope)
         client = gspread.authorize(creds)
 
-        spreadsheet = client.open_by_key("1bwx4LsiH2IFAxvQlZG3skYQSt_zti1yrynRfXlhwlPg")
-        worksheet = spreadsheet.sheet1
-        df = get_as_dataframe(worksheet, evaluate_formulas=True).dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
+        try:
+            spreadsheet = client.open_by_key("1bwx4LsiH2IFAxvQlZG3skYQSt_zti1yrynRfXlhwlPg")
+            worksheet = spreadsheet.sheet1
+        except Exception as e:
+             logger.error(f"Помилка доступу до Google Sheets в PrevPetHandler: {e}")
+             await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="На жаль, виникла проблема з доступом до даних тварин. Спробуйте пізніше.",
+            )
+             return
 
-        required_columns = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Size', 'SkillsAndCharacter', 'Species']
-        missing_columns = [col for col in required_columns if col not in df.columns]
+        df_full = get_as_dataframe(worksheet, evaluate_formulas=True)
+
+        # Додаємо ProfileURL до обов'язкових стовпців для перевірки та читання
+        required_columns = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Size', 'SkillsAndCharacter', 'Species', 'ProfileURL']
+        missing_columns = [col for col in required_columns if col not in df_full.columns]
         if missing_columns:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=f"У таблиці відсутні обов'язкові стовпці: {', '.join(missing_columns)}.",
+                text=f"У таблиці відсутні обов'язкові стовпці: {', '.join(missing_columns)}. Будь ласка, додайте їх.",
             )
             return
 
         species_filter = context.user_data.get('species', 'all')
 
         if species_filter == 'all':
-            df_filtered = df
+            df_filtered = df_full.dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
         elif species_filter == 'Кіт':
-            df_filtered = df[df['Species'] == 'Кіт']
+            df_filtered = df_full[df_full['Species'] == 'Кіт'].dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
         elif species_filter == 'Пес':
-            df_filtered = df[df['Species'] == 'Пес']
+            df_filtered = df_full[df_full['Species'] == 'Пес'].dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
         else:
-            df_filtered = pd.DataFrame()
+            # Якщо species_filter невідомий, можливо, це помилка або скидання фільтра
+            df_filtered = df_full.dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
+            context.user_data['species'] = 'all'# Скидаємо фільтр
 
         if df_filtered.empty:
             await context.bot.send_message(
@@ -80,17 +97,24 @@ class PrevPetHandler(BaseHandler):
         pet_story = pet['MyStory']
         pet_age = pet['Age']
 
-        pet_size = pet['Size'] if not pd.isna(pet['Size']) else 'Невідомо'
-        pet_skills_character = pet['SkillsAndCharacter'] if not pd.isna(
-            pet['SkillsAndCharacter']) else 'Немає інформації'
+        pet_size = pet['Size'] if pd.notna(pet['Size']) else 'Невідомо' # Використовуємо pd.notna
+        pet_skills_character = pet['SkillsAndCharacter'] if pd.notna(pet['SkillsAndCharacter']) else 'Немає інформації' # Використовуємо pd.notna
         pet_image_url = pet['PhotoURL']
+        pet_profile_url = pet.get('ProfileURL', 'N/A')  # або pet.get(...)
+
+        print(f"DEBUG (File: {__file__}): Значення ProfileURL, прочитане з таблиці: {pet_profile_url}")
+        context.user_data['current_pet_url'] = pet_profile_url
+        print(
+            f"DEBUG (File: {__file__}): Значення, збережене у context.user_data['current_pet_url']: {context.user_data.get('current_pet_url', 'КЛЮЧ current_pet_url НЕ ЗНАЙДЕНО')}")
+
 
         if not is_image_url_valid(pet_image_url):
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="Неможливо завантажити зображення для цієї тварини.",
+                text=f"Неможливо завантажити зображення для тварини '{pet_name}'.",
             )
             return
+
 
         try:
             image_response = requests.get(pet_image_url)
@@ -116,10 +140,15 @@ class PrevPetHandler(BaseHandler):
             ]
 
             if update.callback_query:
-                await context.bot.delete_message(
-                    chat_id=update.callback_query.message.chat_id,
-                    message_id=update.callback_query.message.message_id
-                )
+                # Намагаємося видалити попереднє повідомлення
+                try:
+                    await context.bot.delete_message(
+                        chat_id=update.callback_query.message.chat_id,
+                        message_id=update.callback_query.message.message_id
+                    )
+                except Exception as e:
+                     logger.error(f"Failed to delete message: {e}")
+
 
             await context.bot.send_photo(
                 chat_id=update.effective_chat.id,
@@ -130,7 +159,14 @@ class PrevPetHandler(BaseHandler):
             )
 
         except requests.exceptions.RequestException as e:
+            logger.error(f"Помилка при скачуванні зображення або відправці фото: {e}")
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=f"Помилка при скачуванні зображення: {e}",
+                text=f"На жаль, виникла помилка при завантаженні фото тварини або відправці повідомлення. Спробуйте пізніше.",
+            )
+        except Exception as e:
+             logger.error(f"An unexpected error occurred in PrevPetHandler.callback: {e}")
+             await context.bot.send_message(
+                 chat_id=update.effective_chat.id,
+                 text="Виникла неочікувана помилка. Будь ласка, спробуйте пізніше.",
             )

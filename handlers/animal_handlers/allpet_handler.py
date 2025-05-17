@@ -1,5 +1,6 @@
 import re
 from io import BytesIO
+import logging
 
 import gspread
 import pandas as pd
@@ -15,7 +16,7 @@ from handlers.givefamily_handler import GiveFamilyHandler
 
 def escape_markdown_v2(text: str) -> str:
     # Екранує всі спеціальні символи MarkdownV2
-    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
+    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))  # Додано str() на випадок, якщо дані не текстові
 
 
 class AllpetHandler(BaseHandler):
@@ -37,19 +38,29 @@ class AllpetHandler(BaseHandler):
         worksheet = spreadsheet.sheet1  # або назва аркуша: spreadsheet.worksheet("Назва аркуша")
 
         # 3. Зчитування у pandas DataFrame
-        df = get_as_dataframe(worksheet, evaluate_formulas=True).dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
-
-        # Перевірка назв стовпців
-        print("Стовпці таблиці:", df.columns)  # Друк назв стовпців
+        # Додаємо ProfileURL до обов'язкових стовпців для перевірки та читання
+        required_columns_for_df = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Size', 'SkillsAndCharacter', 'Species',
+                                   'ProfileURL']
+        # Вибираємо тільки ці стовпці та видаляємо рядки, де ключові поля (Name, Age, PhotoURL, MyStory) порожні
+        df = get_as_dataframe(worksheet, evaluate_formulas=True)  # Читаємо всю таблицю спочатку
 
         # Перевірка наявності необхідних стовпців
-        required_columns = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Size', 'SkillsAndCharacter']
-        missing_columns = [col for col in required_columns if col not in df.columns]
+        missing_columns = [col for col in required_columns_for_df if col not in df.columns]
 
         if missing_columns:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=f"У таблиці відсутні необхідні стовпці: {', '.join(missing_columns)}.",
+                text=f"У таблиці відсутні необхідні стовпці: {', '.join(missing_columns)}. Будь ласка, додайте їх.",
+            )
+            return
+
+        # Фільтруємо та видаляємо рядки з відсутніми ключовими даними після перевірки стовпців
+        df = df.dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
+
+        if df.empty:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="Наразі немає доступних тварин для показу.",
             )
             return
 
@@ -61,6 +72,12 @@ class AllpetHandler(BaseHandler):
         pet_image_url = random_pet['PhotoURL']
         pet_size = random_pet['Size']
         pet_skills_character = random_pet['SkillsAndCharacter']
+        pet_profile_url = random_pet.get('ProfileURL', 'N/A')  # або pet.get(...)
+
+        print(f"DEBUG (File: {__file__}): Значення ProfileURL, прочитане з таблиці: {pet_profile_url}")
+        context.user_data['current_pet_url'] = pet_profile_url
+        print(
+            f"DEBUG (File: {__file__}): Значення, збережене у context.user_data['current_pet_url']: {context.user_data.get('current_pet_url', 'КЛЮЧ current_pet_url НЕ ЗНАЙДЕНО')}")
 
         if pd.isna(pet_story):
             pet_story = "Історія не доступна."
@@ -79,11 +96,11 @@ class AllpetHandler(BaseHandler):
 
             # Екрануємо текст для MarkdownV2
             caption = (
-                f"Ім'я: {escape_markdown_v2(str(pet_name))}\n"
-                f"Вік: {escape_markdown_v2(str(pet_age))}\n"
-                f"Розмір: {escape_markdown_v2(str(pet_size))}\n"
-                f"Навички та характер: {escape_markdown_v2(str(pet_skills_character))}\n\n"
-                f"Моя історія:\n> {escape_markdown_v2(str(pet_story))}"
+                f"Ім'я: {escape_markdown_v2(pet_name)}\n"
+                f"Вік: {escape_markdown_v2(pet_age)}\n"
+                f"Розмір: {escape_markdown_v2(pet_size)}\n"
+                f"Навички та характер: {escape_markdown_v2(pet_skills_character)}\n\n"
+                f"Моя історія:\n> {escape_markdown_v2(pet_story)}"
             )
 
             keyboard = [
@@ -97,10 +114,13 @@ class AllpetHandler(BaseHandler):
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             if update.callback_query and update.callback_query.data != 'givefamily':
-                await context.bot.delete_message(
-                    chat_id=update.callback_query.message.chat_id,
-                    message_id=update.callback_query.message.message_id
-                )
+                try:
+                    await context.bot.delete_message(
+                        chat_id=update.callback_query.message.chat_id,
+                        message_id=update.callback_query.message.message_id
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to delete message: {e}")
 
             await context.bot.send_photo(
                 chat_id=update.effective_chat.id,
@@ -111,7 +131,14 @@ class AllpetHandler(BaseHandler):
             )
 
         except requests.exceptions.RequestException as e:
+            logging.error(f"Помилка при скачуванні зображення або відправці фото: {e}")
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=f"Помилка при скачуванні зображення: {e}",
+                text=f"На жаль, виникла помилка при завантаженні фото тваринки або відправці повідомлення. Спробуйте пізніше.",
+            )
+        except Exception as e:
+            logging.error(f"An unexpected error occurred in AllpetHandler.callback: {e}")
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="Виникла неочікувана помилка. Будь ласка, спробуйте пізніше.",
             )

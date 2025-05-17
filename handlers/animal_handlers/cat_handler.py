@@ -1,3 +1,4 @@
+import logging  # Додано логування
 import re
 from io import BytesIO
 
@@ -12,9 +13,11 @@ from telegram.ext import ContextTypes
 from handlers.base_handler import BaseHandler
 from handlers.givefamily_handler import GiveFamilyHandler
 
+logger = logging.getLogger(__name__)  # Ініціалізація логера
+
 
 def escape_markdown_v2(text: str) -> str:
-    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
+    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))  # Додано str()
 
 
 class CatHandler(BaseHandler):
@@ -31,25 +34,40 @@ class CatHandler(BaseHandler):
         creds = ServiceAccountCredentials.from_json_keyfile_name("sirius_key (2).json", scope)
         client = gspread.authorize(creds)
 
-        # 2. Підключення до таблиці по ключу
-        spreadsheet = client.open_by_key("1bwx4LsiH2IFAxvQlZG3skYQSt_zti1yrynRfXlhwlPg")
-        worksheet = spreadsheet.sheet1
+        try:
+            # 2. Підключення до таблиці по ключу
+            spreadsheet = client.open_by_key("1bwx4LsiH2IFAxvQlZG3skYQSt_zti1yrynRfXlhwlPg")
+            worksheet = spreadsheet.sheet1
+        except Exception as e:
+            logger.error(f"Помилка доступу до Google Sheets в CatHandler: {e}")
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="На жаль, виникла проблема з доступом до даних тварин. Спробуйте пізніше.",
+            )
+            return
 
         # 3. Зчитування у pandas DataFrame
         df1 = get_as_dataframe(worksheet, evaluate_formulas=True)
 
-        print("Стовпці таблиці:", df1.columns)
-
-        required_columns = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Species', 'Size', 'SkillsAndCharacter']
+        # Додаємо ProfileURL до обов'язкових стовпців для перевірки та читання
+        required_columns = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Species', 'Size', 'SkillsAndCharacter', 'ProfileURL']
         missing_columns = [col for col in required_columns if col not in df1.columns]
         if missing_columns:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=f"У таблиці відсутні необхідні стовпці: {', '.join(missing_columns)}.",
+                text=f"У таблиці відсутні необхідні стовпці: {', '.join(missing_columns)}. Будь ласка, додайте їх.",
             )
             return
 
-        df = df1[df1['Species'] == 'Кіт']
+        # Фільтруємо за видом та видаляємо рядки з відсутніми ключовими даними
+        df = df1[df1['Species'] == 'Кіт'].dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
+
+        if df.empty:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="Наразі немає доступних котів для показу.",
+            )
+            return
 
         random_pet = df.sample(n=1).iloc[0]
         pet_name = random_pet['Name']
@@ -58,6 +76,12 @@ class CatHandler(BaseHandler):
         pet_skills_character = random_pet['SkillsAndCharacter']
         pet_story = random_pet['MyStory']
         pet_image_url = random_pet['PhotoURL']
+        pet_profile_url = random_pet.get('ProfileURL', 'N/A')  # або pet.get(...)
+
+        print(f"DEBUG (File: {__file__}): Значення ProfileURL, прочитане з таблиці: {pet_profile_url}")
+        context.user_data['current_pet_url'] = pet_profile_url
+        print(
+            f"DEBUG (File: {__file__}): Значення, збережене у context.user_data['current_pet_url']: {context.user_data.get('current_pet_url', 'КЛЮЧ current_pet_url НЕ ЗНАЙДЕНО')}")
 
         if pd.isna(pet_story):
             pet_story = "Історія не доступна."
@@ -83,19 +107,22 @@ class CatHandler(BaseHandler):
 
             keyboard = [
                 [
-                    InlineKeyboardButton('<<', callback_data='prev'),
+                    InlineKeyboardButton('<<', callback_data='prev'),  # prev/next потребуватимуть фільтрації за видом
                     InlineKeyboardButton("Подарувати сім`ю", callback_data='givefamily'),
-                    InlineKeyboardButton('>>', callback_data='next')
+                    InlineKeyboardButton('>>', callback_data='next')  # prev/next потребуватимуть фільтрації за видом
                 ],
                 [InlineKeyboardButton('У головне меню', callback_data='menu')],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             if update.callback_query and update.callback_query.data != 'givefamily':
-                await context.bot.delete_message(
-                    chat_id=update.callback_query.message.chat_id,
-                    message_id=update.callback_query.message.message_id
-                )
+                try:
+                    await context.bot.delete_message(
+                        chat_id=update.callback_query.message.chat_id,
+                        message_id=update.callback_query.message.message_id
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to delete message: {e}")
 
             await context.bot.send_photo(
                 chat_id=update.effective_chat.id,
@@ -105,8 +132,19 @@ class CatHandler(BaseHandler):
                 reply_markup=reply_markup
             )
 
+            # Зберігаємо поточний фільтр виду тварини для prev/next
+            context.user_data['species'] = 'Кіт'
+
+
         except requests.exceptions.RequestException as e:
+            logger.error(f"Помилка при скачуванні зображення або відправці фото: {e}")
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=f"Помилка при скачуванні зображення: {e}",
+                text=f"На жаль, виникла помилка при завантаженні фото тваринки або відправці повідомлення. Спробуйте пізніше.",
+            )
+        except Exception as e:
+            logger.error(f"An unexpected error occurred in CatHandler.callback: {e}")
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="Виникла неочікувана помилка. Будь ласка, спробуйте пізніше.",
             )
