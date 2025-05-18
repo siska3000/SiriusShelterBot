@@ -1,23 +1,33 @@
-import re
-from io import BytesIO
+import json
 import logging
+import os
+import re
 
-import gspread
 import pandas as pd
-import requests
-from gspread_dataframe import get_as_dataframe
-from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from handlers.base_handler import BaseHandler
 from handlers.givefamily_handler import GiveFamilyHandler
 
+# Очищення попередніх обробників логів
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+# Екранування MarkdownV2
 def escape_markdown_v2(text: str) -> str:
-    # Екранує всі спеціальні символи MarkdownV2
-    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))  # Додано str() на випадок, якщо дані не текстові
+    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
 
+# Скорочення тексту
+def truncate_text(text: str, max_length: int) -> str:
+    if len(text) > max_length:
+        return text[:max_length - 3] + "..."
+    return text
 
 class AllpetHandler(BaseHandler):
     @classmethod
@@ -27,81 +37,76 @@ class AllpetHandler(BaseHandler):
 
     @staticmethod
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logging.info("AllpetHandler callback triggered")
 
-        # 1. Авторизація через JSON-файл ключа
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name("sirius_key (2).json", scope)
-        client = gspread.authorize(creds)
-
-        # 2. Підключення до таблиці по ключу
-        spreadsheet = client.open_by_key("1bwx4LsiH2IFAxvQlZG3skYQSt_zti1yrynRfXlhwlPg")
-        worksheet = spreadsheet.sheet1  # або назва аркуша: spreadsheet.worksheet("Назва аркуша")
-
-        # 3. Зчитування у pandas DataFrame
-        # Додаємо ProfileURL до обов'язкових стовпців для перевірки та читання
-        required_columns_for_df = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Size', 'SkillsAndCharacter', 'Species',
-                                   'ProfileURL']
-        # Вибираємо тільки ці стовпці та видаляємо рядки, де ключові поля (Name, Age, PhotoURL, MyStory) порожні
-        df = get_as_dataframe(worksheet, evaluate_formulas=True)  # Читаємо всю таблицю спочатку
-
-        # Перевірка наявності необхідних стовпців
-        missing_columns = [col for col in required_columns_for_df if col not in df.columns]
-
-        if missing_columns:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=f"У таблиці відсутні необхідні стовпці: {', '.join(missing_columns)}. Будь ласка, додайте їх.",
-            )
-            return
-
-        # Фільтруємо та видаляємо рядки з відсутніми ключовими даними після перевірки стовпців
-        df = df.dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
-
-        if df.empty:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="Наразі немає доступних тварин для показу.",
-            )
-            return
-
-        # Вибір випадкової тварини
-        random_pet = df.sample(n=1).iloc[0]
-        pet_name = random_pet['Name']
-        pet_story = random_pet['MyStory']
-        pet_age = random_pet['Age']
-        pet_image_url = random_pet['PhotoURL']
-        pet_size = random_pet['Size']
-        pet_skills_character = random_pet['SkillsAndCharacter']
-        pet_profile_url = random_pet.get('ProfileURL', 'N/A')  # або pet.get(...)
-
-        print(f"DEBUG (File: {__file__}): Значення ProfileURL, прочитане з таблиці: {pet_profile_url}")
-        context.user_data['current_pet_url'] = pet_profile_url
-        print(
-            f"DEBUG (File: {__file__}): Значення, збережене у context.user_data['current_pet_url']: {context.user_data.get('current_pet_url', 'КЛЮЧ current_pet_url НЕ ЗНАЙДЕНО')}")
-
-        if pd.isna(pet_story):
-            pet_story = "Історія не доступна."
-        if pd.isna(pet_size):
-            pet_size = "Розмір не вказано."
-        if pd.isna(pet_skills_character):
-            pet_skills_character = "Навички та характер не описано."
-
-        # Скачування зображення
         try:
-            image_response = requests.get(pet_image_url)
-            image_response.raise_for_status()
+            # Читання з локального JSON-файлу
+            with open('google_sheet_data_updated.json', 'r', encoding='utf-8') as f:
+                data = json.load(f)
 
-            image = BytesIO(image_response.content)
-            image.name = 'pet_image.jpg'
+            df = pd.DataFrame(data)
 
-            # Екрануємо текст для MarkdownV2
-            caption = (
-                f"Ім'я: {escape_markdown_v2(pet_name)}\n"
-                f"Вік: {escape_markdown_v2(pet_age)}\n"
-                f"Розмір: {escape_markdown_v2(pet_size)}\n"
-                f"Навички та характер: {escape_markdown_v2(pet_skills_character)}\n\n"
-                f"Моя історія:\n> {escape_markdown_v2(pet_story)}"
-            )
+            required_columns = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Size', 'SkillsAndCharacter', 'Species', 'ProfileURL']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+
+            if missing_columns:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=f"У таблиці відсутні необхідні стовпці: {', '.join(missing_columns)}. Будь ласка, додайте їх.",
+                )
+                return
+
+            df = df.dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
+            if df.empty:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Наразі немає доступних тварин для показу.",
+                )
+                return
+
+            random_pet = df.sample(n=1).iloc[0]
+            pet_name = random_pet['Name']
+            pet_age = random_pet['Age']
+            pet_story_original = random_pet['MyStory']
+            pet_size = random_pet.get('Size', 'Розмір не вказано.')
+            pet_skills_character = random_pet.get('SkillsAndCharacter', 'Навички та характер не описано.')
+            pet_profile_url = random_pet.get('ProfileURL', 'Немає посилання профілю')
+
+            # Обробка шляху до фото
+            BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+            pet_photo_path = os.path.join(BASE_DIR, random_pet['PhotoURL'])
+
+            logging.info(f"Шлях до фото: {pet_photo_path}")
+            logging.info(f"Файл існує? {os.path.isfile(pet_photo_path)}")
+
+            # --- Зберігаємо дані тваринки для GiveFamilyHandler ---
+            context.user_data['current_pet_name'] = str(pet_name) if pd.notna(pet_name) else 'Невідоме ім\'я'
+            context.user_data['current_pet_age'] = str(pet_age) if pd.notna(pet_age) else 'Невідомий вік'
+            context.user_data['current_pet_url'] = pet_profile_url
+
+            if not os.path.isfile(pet_photo_path):
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=f"Фото для тварини '{pet_name}' не знайдено локально.",
+                )
+                return
+
+            caption_parts = [
+                f"Ім'я: {escape_markdown_v2(pet_name)}",
+                f"Вік: {escape_markdown_v2(pet_age)}",
+                f"Розмір: {escape_markdown_v2(pet_size)}",
+                f"Навички та характер: {escape_markdown_v2(pet_skills_character)}",
+            ]
+
+            base_caption_text = "\n".join(caption_parts) + "\n\nМоя історія:\n> "
+            max_story_length = 1024 - len(base_caption_text) - 50
+
+            pet_story_escaped = escape_markdown_v2(pet_story_original)
+            truncated_story = truncate_text(pet_story_escaped, max_story_length)
+            caption = base_caption_text + truncated_story
+
+            if len(caption) > 1024:
+                caption = truncate_text(caption, 1024)
 
             keyboard = [
                 [
@@ -120,25 +125,20 @@ class AllpetHandler(BaseHandler):
                         message_id=update.callback_query.message.message_id
                     )
                 except Exception as e:
-                    logging.error(f"Failed to delete message: {e}")
+                    logging.error(f"Не вдалося видалити повідомлення: {e}")
 
-            await context.bot.send_photo(
-                chat_id=update.effective_chat.id,
-                photo=image,
-                caption=caption,
-                parse_mode='MarkdownV2',
-                reply_markup=reply_markup
-            )
+            with open(pet_photo_path, 'rb') as image_file:
+                await context.bot.send_photo(
+                    chat_id=update.effective_chat.id,
+                    photo=image_file,
+                    caption=caption,
+                    parse_mode='MarkdownV2',
+                    reply_markup=reply_markup
+                )
 
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Помилка при скачуванні зображення або відправці фото: {e}")
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=f"На жаль, виникла помилка при завантаженні фото тваринки або відправці повідомлення. Спробуйте пізніше.",
-            )
         except Exception as e:
-            logging.error(f"An unexpected error occurred in AllpetHandler.callback: {e}")
+            logging.error(f"Несподівана помилка в AllpetHandler.callback: {e}")
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="Виникла неочікувана помилка. Будь ласка, спробуйте пізніше.",
+                text="Сталася непередбачувана помилка. Спробуйте пізніше.",
             )
