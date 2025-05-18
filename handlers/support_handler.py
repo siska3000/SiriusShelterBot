@@ -18,7 +18,7 @@ class SupportHandler(BaseHandler):
         keyboard = [
             [InlineKeyboardButton('Monobank', callback_data='mono'),
              InlineKeyboardButton('Privat24', callback_data='privat')],
-            [InlineKeyboardButton('Назад', callback_data='support')],
+            [InlineKeyboardButton('Назад', callback_data='menu')],
 
         ]
 

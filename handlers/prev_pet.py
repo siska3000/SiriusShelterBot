@@ -102,11 +102,10 @@ class PrevPetHandler(BaseHandler):
         pet_image_url = pet['PhotoURL']
         pet_profile_url = pet.get('ProfileURL', 'N/A')  # або pet.get(...)
 
-        print(f"DEBUG (File: {__file__}): Значення ProfileURL, прочитане з таблиці: {pet_profile_url}")
+        # --- Зберігаємо дані тваринки для GiveFamilyHandler ---
+        context.user_data['current_pet_name'] = str(pet_name) if pd.notna(pet_name) else 'Невідоме ім\'я'
+        context.user_data['current_pet_age'] = str(pet_age) if pd.notna(pet_age) else 'Невідомий вік'
         context.user_data['current_pet_url'] = pet_profile_url
-        print(
-            f"DEBUG (File: {__file__}): Значення, збережене у context.user_data['current_pet_url']: {context.user_data.get('current_pet_url', 'КЛЮЧ current_pet_url НЕ ЗНАЙДЕНО')}")
-
 
         if not is_image_url_valid(pet_image_url):
             await context.bot.send_message(
@@ -127,7 +126,7 @@ class PrevPetHandler(BaseHandler):
                 f"Вік: {escape_markdown_v2(pet_age)}\n"
                 f"Розмір: {escape_markdown_v2(pet_size)}\n"
                 f"Навички та характер: {escape_markdown_v2(pet_skills_character)}\n\n"
-                f"Моя історія:\n> {escape_markdown_v2(pet_story)}"
+                f"Моя історія:\n>{escape_markdown_v2(pet_story)}"
             )
 
             keyboard = [
@@ -136,7 +135,7 @@ class PrevPetHandler(BaseHandler):
                     InlineKeyboardButton("Подарувати сім`ю", callback_data='givefamily'),
                     InlineKeyboardButton('>>', callback_data='next')
                 ],
-                [InlineKeyboardButton('У головне меню', callback_data='menu')],
+                [InlineKeyboardButton('Назад', callback_data='watchpet')],
             ]
 
             if update.callback_query:

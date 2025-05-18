@@ -14,7 +14,7 @@ class PrivatbankHandler(BaseHandler):
     @staticmethod
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
-            [InlineKeyboardButton('У головне меню', callback_data='menu')],
+            [InlineKeyboardButton('Назад', callback_data='support')],
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)

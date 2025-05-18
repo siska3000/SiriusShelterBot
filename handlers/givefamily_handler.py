@@ -3,7 +3,8 @@ import re
 
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, \
+    InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes,
     ConversationHandler,
@@ -13,9 +14,6 @@ from telegram.ext import (
 )
 
 from handlers.base_handler import BaseHandler
-
-# from googleapiclient.discovery import build
-# from googleapiclient.errors import HttpError
 
 # States
 EMAIL, PHONE, FIRST_NAME, LAST_NAME, COMMENT = range(5)
@@ -31,10 +29,9 @@ logger = logging.getLogger(__name__)
 class GiveFamilyHandler(BaseHandler):
     # Google Sheets config
     CREDENTIALS_FILE = "sirius_key (2).json"
-    SPREADSHEET_ID = "1jjIDk58RjKF8SeNrm0a3Ijt8zpLa9pT2wej4053MXZk"  # Direct spreadsheet ID
+    SPREADSHEET_ID = "1jjIDk58RjKF8SeNrm0a3Ijt8zpLa9pT2wej4053MXZk"
     WORKSHEET_NAME = "Лист1"
-    SHEET_LINK = "https://docs.google.com/spreadsheets/d/1jjIDk58RjKF8SeNrm0a3Ijt8zpLa9pT2wej4053MXZk/edit?usp=sharing"
-    SERVICE_ACCOUNT_EMAIL = "sheltersirius@sirius-459511.iam.gserviceaccount.com"  # From your credentials file
+    SERVICE_ACCOUNT_EMAIL = "sheltersirius@sirius-459511.iam.gserviceaccount.com"
 
     @classmethod
     def register(cls, app, button):
@@ -52,7 +49,7 @@ class GiveFamilyHandler(BaseHandler):
                 LAST_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, cls.get_last_name)],
                 COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, cls.get_comment)],
             },
-            fallbacks=[],  # Можливо, варто додати fallbacks для скасування розмови
+            fallbacks=[],
             allow_reentry=True,
         )
         app.add_handler(conv_handler)
@@ -81,57 +78,39 @@ class GiveFamilyHandler(BaseHandler):
             return gspread.authorize(creds)
         except Exception as e:
             logger.error(f"Google Sheets authentication error: {e}")
-            raise  # Прокидаємо виняток далі для обробки в get_comment
+            raise
 
     @staticmethod
     def _verify_sheet_access():
         """Verify access to the specific spreadsheet"""
         try:
             client = GiveFamilyHandler._get_google_sheet_client()
-
-            # Try to open the spreadsheet directly by ID
             spreadsheet = client.open_by_key(GiveFamilyHandler.SPREADSHEET_ID)
-
-            # Verify worksheet exists or create it
             try:
                 worksheet = spreadsheet.worksheet(GiveFamilyHandler.WORKSHEET_NAME)
                 logger.info(f"Found worksheet: {GiveFamilyHandler.WORKSHEET_NAME}")
             except gspread.exceptions.WorksheetNotFound:
+                logger.warning(f"Worksheet '{GiveFamilyHandler.WORKSHEET_NAME}' not found, attempting to create.")
                 worksheet = spreadsheet.add_worksheet(
                     title=GiveFamilyHandler.WORKSHEET_NAME,
-                    rows=1000,  # Можливо, варто зробити більше рядків
-                    cols=20  # Можливо, варто зробити більше стовпців
+                    rows=1000,
+                    cols=20
                 )
-                logger.info(f"Created new worksheet: {GiveFamilyHandler.WORKSHEET_NAME}")
-
-            # Можна також перевірити наявність очікуваних заголовків стовпців тут
-
+                # Можливо, варто додати заголовки після створення аркуша
+                headers = ["Application ID", "Pet Profile URL", "Email", "Phone", "First Name", "Last Name", "Comment"]
+                worksheet.append_row(headers)
+                logger.info(f"Created new worksheet '{GiveFamilyHandler.WORKSHEET_NAME}' with headers.")
             return True
         except gspread.exceptions.APIError as e:
-            if 'PERMISSION_DENIED' in str(e):
-                error_msg = (
-                    "🔒 Помилка доступу до Google Таблиці\n\n"
-                    f"Будь ласка, надайте доступ для облікового запису:\n"
-                    f"{GiveFamilyHandler.SERVICE_ACCOUNT_EMAIL}\n\n"
-                    f"1. Відкрийте таблицю: {GiveFamilyHandler.SHEET_LINK}\n"
-                    f"2. Натисніть 'Налаштування доступу' (Share)\n"
-                    f"3. Додайте вищевказаний email з правами редактора (Editor)"
-                )
-                logger.error(error_msg)
-                raise PermissionError(error_msg)  # Прокидаємо PermissionError
-            raise  # Прокидаємо інші APIError
-        except Exception as e:
             logger.error(f"Sheet access verification failed: {e}")
-            raise  # Прокидаємо інші винятки
+            raise
 
     @staticmethod
-    def _append_to_sheet(context: ContextTypes.DEFAULT_TYPE,
-                         user_data_list: list):  # Приймаємо context та список даних користувача
+    def _append_to_sheet(context: ContextTypes.DEFAULT_TYPE, user_data_list: list):
         """Appends application data including pet URL and application ID to the Google Sheet."""
         try:
             client = GiveFamilyHandler._get_google_sheet_client()
             spreadsheet = client.open_by_key(GiveFamilyHandler.SPREADSHEET_ID)
-
             try:
                 worksheet = spreadsheet.worksheet(GiveFamilyHandler.WORKSHEET_NAME)
             except gspread.exceptions.WorksheetNotFound:
@@ -145,8 +124,9 @@ class GiveFamilyHandler(BaseHandler):
             all_rows = worksheet.get_all_values()
             next_application_id = len(all_rows) + 1
 
-            # Отримуємо ProfileURL тваринки зі збережених даних користувача
+            # Отримуємо дані тваринки зі збережених даних користувача
             pet_profile_url = context.user_data.get('current_pet_url', 'N/A')
+            # Ми не зберігаємо ім'я та вік у таблицю анкет за цим запитом, тільки URL.
 
             # Формуємо повний рядок даних для запису
             # Порядок: ID анкети, ProfileURL тваринки, email, phone, first_name, last_name, comment
@@ -154,71 +134,51 @@ class GiveFamilyHandler(BaseHandler):
             full_data_row = [
                 next_application_id,  # 1. ID анкети
                 pet_profile_url,  # 2. ProfileURL тваринки
-                *user_data_list
-                # 3-7. Розпаковуємо список з даними користувача (email, phone, first_name, last_name, comment)
+                *user_data_list  # 3-7. Розпаковуємо список з даними користувача
             ]
 
-            worksheet.append_row(full_data_row)  # Записуємо повний рядок
+            worksheet.append_row(full_data_row)
             logger.info(f"Successfully wrote data to sheet: {full_data_row}")
             return True
         except Exception as e:
             logger.error(f"Failed to write to sheet: {e}")
-            raise  # Прокидаємо виняток далі для обробки в get_comment
+            raise
 
     @staticmethod
     async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
         email = update.message.text.strip()
-
         if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", email):
             await update.message.reply_text("❌ Ви ввели невірний email. Спробуйте ще раз:")
             return EMAIL
-
         context.user_data['email'] = email
-        # Використовуємо клавіатуру для запиту контакту
         keyboard = [
-            [KeyboardButton('Поділитися номером телефону', request_contact=True)]  # Український текст
+            [KeyboardButton('Поділитися номером телефону', request_contact=True)]
         ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True,
-                                           resize_keyboard=True)  # resize_keyboard для кращого вигляду
-
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="📞 Введіть ваш номер телефону або натисніть кнопку 'Поділитися номером телефону':",
-            # Змінено текст під кнопку
             reply_markup=reply_markup
         )
-
         return PHONE
 
     @staticmethod
     async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # Перевіряємо, чи це контакт
+        phone = None
         if update.message.contact:
             phone = update.message.contact.phone_number
-            # Після надсилання контакту, прибираємо клавіатуру
-            reply_markup = ReplyKeyboardRemove()
-            await update.message.reply_text("Дякую! Номер отримано.",
-                                            reply_markup=reply_markup)  # Додано повідомлення про отримання номеру
+            await update.message.reply_text("Дякую! Номер отримано.", reply_markup=ReplyKeyboardRemove())
         else:
             phone = update.message.text.strip()
-            # Тут можна додати більш строгу валідацію формату номеру телефону, якщо не використовується кнопка
 
-        # Проста перевірка наявності номеру
         if not phone:
             await update.message.reply_text(
                 "❌ Будь ласка, введіть номер телефону або надішліть контакт за допомогою кнопки.")
             return PHONE
 
         context.user_data['phone'] = phone
-        # Прибираємо клавіатуру, якщо номер введено текстом (на випадок, якщо користувач не натиснув кнопку)
-        # Або це вже зроблено, якщо номер відправлено контактом
-        try:
-            await context.bot.delete_message(
-                chat_id=update.effective_chat.id,
-                message_id=update.message.message_id  # Видаляємо повідомлення з клавіатурою запиту контакту
-            )
-            # Або відправляємо нове повідомлення без клавіатури
-        except Exception:
+
+        if not update.message.contact:
             pass
 
         await update.message.reply_text("👤 Введіть ваше ім'я:")
@@ -243,7 +203,6 @@ class GiveFamilyHandler(BaseHandler):
         comment = update.message.text.strip()
         context.user_data['comment'] = comment if comment.lower() not in ['пропустити', 'skip'] else "N/A"
 
-        # Збираємо дані користувача в список
         user_data_list = [
             context.user_data.get('email', 'N/A'),
             context.user_data.get('phone', 'N/A'),
@@ -252,36 +211,36 @@ class GiveFamilyHandler(BaseHandler):
             context.user_data.get('comment', 'N/A'),
         ]
 
-        # Отримуємо URL тваринки, збережений раніше
-        pet_profile_url = context.user_data.get('current_pet_url', 'N/A')
+        pet_name = context.user_data.get('current_pet_name', 'Невідоме ім\'я')
+        pet_age = context.user_data.get('current_pet_age', 'Невідомий вік')
 
         try:
             GiveFamilyHandler._append_to_sheet(context, user_data_list)
 
-            # Формуємо summary для користувача (можна додати URL тваринки)
             summary = (
                 f"✅ Ваша анкета успішно надіслана!\n\n"
-                f"🔗 Посилання на тваринку: {pet_profile_url}\n"  # Додано URL тваринки
+                f"🐶 Тваринка: {pet_name}, {pet_age}\n"
                 f"📧 Емейл: {user_data_list[0]}\n"
                 f"📞 Телефон: {user_data_list[1]}\n"
                 f"👤 Ім'я: {user_data_list[2]}\n"
                 f"👥 Прізвище: {user_data_list[3]}\n"
                 f"💬 Коментар: {user_data_list[4]}\n\n"
-                f"Дякуємо за ваш інтерес до наших підопічних! Ми зв'яжемося з вами найближчим часом."
-            # Фінальне повідомлення
+                f"Дякуємо за ваш інтерес до наших хвостиків! Ми зв'яжемося з вами найближчим часом."
             )
-            await update.message.reply_text(summary)
+
+            keyboard = [
+                [InlineKeyboardButton('У головне меню', callback_data='menu')],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(summary, reply_markup=reply_markup)
 
         except PermissionError as e:
-            # Обробка помилки доступу до таблиці
             await update.message.reply_text(str(e))
         except Exception as e:
-            # Обробка інших помилок запису
             logger.error(f"Failed to save data to sheet in get_comment: {e}")
             await update.message.reply_text(
                 "❌ Помилка збереження даних анкети. Будь ласка, спробуйте пізніше або зв'яжіться з нами іншим способом."
             )
 
-        # Clear conversation data
         context.user_data.clear()
         return ConversationHandler.END
