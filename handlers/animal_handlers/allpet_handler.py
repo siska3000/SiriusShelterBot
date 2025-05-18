@@ -19,15 +19,18 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+
 # Екранування MarkdownV2
 def escape_markdown_v2(text: str) -> str:
     return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
+
 
 # Скорочення тексту
 def truncate_text(text: str, max_length: int) -> str:
     if len(text) > max_length:
         return text[:max_length - 3] + "..."
     return text
+
 
 class AllpetHandler(BaseHandler):
     @classmethod
@@ -46,7 +49,8 @@ class AllpetHandler(BaseHandler):
 
             df = pd.DataFrame(data)
 
-            required_columns = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Size', 'SkillsAndCharacter', 'Species', 'ProfileURL']
+            required_columns = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Size', 'SkillsAndCharacter', 'Species',
+                                'ProfileURL']
             missing_columns = [col for col in required_columns if col not in df.columns]
 
             if missing_columns:

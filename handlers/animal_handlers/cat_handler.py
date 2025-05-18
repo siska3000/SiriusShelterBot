@@ -9,13 +9,16 @@ from telegram.ext import ContextTypes
 from handlers.base_handler import BaseHandler
 from handlers.givefamily_handler import GiveFamilyHandler
 
+
 def escape_markdown_v2(text: str) -> str:
     return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
+
 
 def truncate_text(text: str, max_length: int) -> str:
     if len(text) > max_length:
         return text[:max_length - 3] + "..."
     return text
+
 
 class CatHandler(BaseHandler):
     @classmethod
@@ -33,7 +36,8 @@ class CatHandler(BaseHandler):
 
             df = pd.DataFrame(data)
 
-            required_columns = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Size', 'SkillsAndCharacter', 'Species', 'ProfileURL']
+            required_columns = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Size', 'SkillsAndCharacter', 'Species',
+                                'ProfileURL']
             missing_columns = [col for col in required_columns if col not in df.columns]
 
             if missing_columns:
@@ -72,8 +76,6 @@ class CatHandler(BaseHandler):
             context.user_data['current_pet_name'] = str(pet_name) if pd.notna(pet_name) else 'Невідоме ім\'я'
             context.user_data['current_pet_age'] = str(pet_age) if pd.notna(pet_age) else 'Невідомий вік'
             context.user_data['current_pet_url'] = pet_profile_url
-
-
 
             if not os.path.isfile(pet_photo_path):
                 await context.bot.send_message(
