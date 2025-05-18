@@ -50,16 +50,7 @@ class CatHandler(BaseHandler):
         df1 = get_as_dataframe(worksheet, evaluate_formulas=True)
 
         # Додаємо ProfileURL до обов'язкових стовпців для перевірки та читання
-        required_columns = [
-            'Name',
-            'Age',
-            'PhotoURL',
-            'MyStory',
-            'Species'
-            'Size',
-            'SkillsAndCharacter',
-            'ProfileURL'
-        ]
+        required_columns = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Species', 'Size', 'SkillsAndCharacter', 'ProfileURL']
         missing_columns = [col for col in required_columns if col not in df1.columns]
         if missing_columns:
             await context.bot.send_message(
@@ -87,10 +78,10 @@ class CatHandler(BaseHandler):
         pet_image_url = random_pet['PhotoURL']
         pet_profile_url = random_pet.get('ProfileURL', 'N/A')  # або pet.get(...)
 
-        # --- Зберігаємо дані тваринки для GiveFamilyHandler ---
-        context.user_data['current_pet_name'] = str(pet_name) if pd.notna(pet_name) else 'Невідоме ім\'я'
-        context.user_data['current_pet_age'] = str(pet_age) if pd.notna(pet_age) else 'Невідомий вік'
+        print(f"DEBUG (File: {__file__}): Значення ProfileURL, прочитане з таблиці: {pet_profile_url}")
         context.user_data['current_pet_url'] = pet_profile_url
+        print(
+            f"DEBUG (File: {__file__}): Значення, збережене у context.user_data['current_pet_url']: {context.user_data.get('current_pet_url', 'КЛЮЧ current_pet_url НЕ ЗНАЙДЕНО')}")
 
         if pd.isna(pet_story):
             pet_story = "Історія не доступна."
@@ -111,7 +102,7 @@ class CatHandler(BaseHandler):
                 f"Вік: {escape_markdown_v2(str(pet_age))}\n"
                 f"Розмір: {escape_markdown_v2(str(pet_size))}\n"
                 f"Навички та характер: {escape_markdown_v2(str(pet_skills_character))}\n\n"
-                f"Моя історія:\n>{escape_markdown_v2(str(pet_story))}"
+                f"Моя історія:\n> {escape_markdown_v2(str(pet_story))}"
             )
 
             keyboard = [
@@ -120,7 +111,7 @@ class CatHandler(BaseHandler):
                     InlineKeyboardButton("Подарувати сім`ю", callback_data='givefamily'),
                     InlineKeyboardButton('>>', callback_data='next')  # prev/next потребуватимуть фільтрації за видом
                 ],
-                [InlineKeyboardButton('Назад', callback_data='watchpet')],
+                [InlineKeyboardButton('У головне меню', callback_data='menu')],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 

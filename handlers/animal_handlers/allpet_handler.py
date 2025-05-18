@@ -1,9 +1,9 @@
-import logging
 import re
 from io import BytesIO
+import logging
 
 import gspread
-import pandas as pd  # Переконайтесь, що pandas імпортовано
+import pandas as pd
 import requests
 from gspread_dataframe import get_as_dataframe
 from oauth2client.service_account import ServiceAccountCredentials
@@ -13,10 +13,9 @@ from telegram.ext import ContextTypes
 from handlers.base_handler import BaseHandler
 from handlers.givefamily_handler import GiveFamilyHandler
 
-logger = logging.getLogger(__name__)
-
 
 def escape_markdown_v2(text: str) -> str:
+    # Екранує всі спеціальні символи MarkdownV2
     return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))  # Додано str() на випадок, якщо дані не текстові
 
 
@@ -34,28 +33,14 @@ class AllpetHandler(BaseHandler):
         creds = ServiceAccountCredentials.from_json_keyfile_name("sirius_key (2).json", scope)
         client = gspread.authorize(creds)
 
-        try:
-            spreadsheet = client.open_by_key("1bwx4LsiH2IFAxvQlZG3skYQSt_zti1yrynRfXlhwlPg")
-            worksheet = spreadsheet.sheet1  # або назва аркуша: spreadsheet.worksheet("Назва аркуша")
-        except Exception as e:
-            logger.error(f"Помилка доступу до Google Sheets в AllpetHandler: {e}")
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="На жаль, виникла проблема з доступом до даних тварин. Спробуйте пізніше.",
-            )
-            return
+        # 2. Підключення до таблиці по ключу
+        spreadsheet = client.open_by_key("1bwx4LsiH2IFAxvQlZG3skYQSt_zti1yrynRfXlhwlPg")
+        worksheet = spreadsheet.sheet1  # або назва аркуша: spreadsheet.worksheet("Назва аркуша")
 
-        # Додаємо ProfileURL, Name, Age до обов'язкових стовпців для перевірки та читання
-        required_columns_for_df = [
-            'Name',
-            'Age',
-            'PhotoURL',
-            'MyStory',
-            'Size',
-            'SkillsAndCharacter',
-            'Species',
-            'ProfileURL'
-        ]
+        # 3. Зчитування у pandas DataFrame
+        # Додаємо ProfileURL до обов'язкових стовпців для перевірки та читання
+        required_columns_for_df = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Size', 'SkillsAndCharacter', 'Species',
+                                   'ProfileURL']
         # Вибираємо тільки ці стовпці та видаляємо рядки, де ключові поля (Name, Age, PhotoURL, MyStory) порожні
         df = get_as_dataframe(worksheet, evaluate_formulas=True)  # Читаємо всю таблицю спочатку
 
@@ -82,17 +67,17 @@ class AllpetHandler(BaseHandler):
         # Вибір випадкової тварини
         random_pet = df.sample(n=1).iloc[0]
         pet_name = random_pet['Name']
+        pet_story = random_pet['MyStory']
         pet_age = random_pet['Age']
+        pet_image_url = random_pet['PhotoURL']
         pet_size = random_pet['Size']
         pet_skills_character = random_pet['SkillsAndCharacter']
-        pet_story = random_pet['MyStory']
-        pet_image_url = random_pet['PhotoURL']
-        pet_profile_url = random_pet.get('ProfileURL', 'N/A')  # Отримуємо ProfileURL
+        pet_profile_url = random_pet.get('ProfileURL', 'N/A')  # або pet.get(...)
 
-        # --- Зберігаємо дані тваринки для GiveFamilyHandler ---
-        context.user_data['current_pet_name'] = str(pet_name) if pd.notna(pet_name) else 'Невідоме ім\'я'
-        context.user_data['current_pet_age'] = str(pet_age) if pd.notna(pet_age) else 'Невідомий вік'
+        print(f"DEBUG (File: {__file__}): Значення ProfileURL, прочитане з таблиці: {pet_profile_url}")
         context.user_data['current_pet_url'] = pet_profile_url
+        print(
+            f"DEBUG (File: {__file__}): Значення, збережене у context.user_data['current_pet_url']: {context.user_data.get('current_pet_url', 'КЛЮЧ current_pet_url НЕ ЗНАЙДЕНО')}")
 
         if pd.isna(pet_story):
             pet_story = "Історія не доступна."
@@ -115,7 +100,7 @@ class AllpetHandler(BaseHandler):
                 f"Вік: {escape_markdown_v2(pet_age)}\n"
                 f"Розмір: {escape_markdown_v2(pet_size)}\n"
                 f"Навички та характер: {escape_markdown_v2(pet_skills_character)}\n\n"
-                f"Моя історія:\n>{escape_markdown_v2(pet_story)}"
+                f"Моя історія:\n> {escape_markdown_v2(pet_story)}"
             )
 
             keyboard = [
@@ -124,7 +109,7 @@ class AllpetHandler(BaseHandler):
                     InlineKeyboardButton("Подарувати сім`ю", callback_data='givefamily'),
                     InlineKeyboardButton('>>', callback_data='next')
                 ],
-                [InlineKeyboardButton('Назад', callback_data='watchpet')],
+                [InlineKeyboardButton('У головне меню', callback_data='menu')],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -135,7 +120,7 @@ class AllpetHandler(BaseHandler):
                         message_id=update.callback_query.message.message_id
                     )
                 except Exception as e:
-                    logger.error(f"Failed to delete message: {e}")
+                    logging.error(f"Failed to delete message: {e}")
 
             await context.bot.send_photo(
                 chat_id=update.effective_chat.id,
@@ -146,13 +131,13 @@ class AllpetHandler(BaseHandler):
             )
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Помилка при скачуванні зображення або відправці фото: {e}")
+            logging.error(f"Помилка при скачуванні зображення або відправці фото: {e}")
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=f"На жаль, виникла помилка при завантаженні фото тваринки або відправці повідомлення. Спробуйте пізніше.",
             )
         except Exception as e:
-            logger.error(f"An unexpected error occurred in AllpetHandler.callback: {e}")
+            logging.error(f"An unexpected error occurred in AllpetHandler.callback: {e}")
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text="Виникла неочікувана помилка. Будь ласка, спробуйте пізніше.",
