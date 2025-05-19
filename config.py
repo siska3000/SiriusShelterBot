@@ -5,4 +5,5 @@ from dotenv import load_dotenv
 load_dotenv()  # take environment variables from .env.
 
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+ADMIN_ID = os.getenv('ADMIN_ID')
 

@@ -1,17 +1,20 @@
+import logging
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler
 
+from handlers.base_handler import BaseHandler
+from handlers.manager_handler import ManagerHandler
 from handlers.pet_handler import PetHandler
 from handlers.socialmedia_handler import SocialMediaHandler
-from handlers.manager_handler import ManagerHandler
-from handlers.base_handler import BaseHandler
 from handlers.support_handler import SupportHandler
+
+logger = logging.getLogger(__name__)
 
 
 class StartHandler(BaseHandler):
     @classmethod
     def register(cls, app, button_handler):
-
         app.add_handler(CommandHandler('start', cls.callback))
 
         button_handler.register_callback('support', SupportHandler.callback)
@@ -22,6 +25,10 @@ class StartHandler(BaseHandler):
 
     @staticmethod
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        is_admin = BaseHandler.is_admin(user_id)
+        logger.info(f"User {user_id} is admin: {is_admin}")
+
         keyboard = [
             [InlineKeyboardButton('Переглянути тварин 🐶', callback_data='watchpet')],
             [
@@ -31,17 +38,22 @@ class StartHandler(BaseHandler):
             [InlineKeyboardButton("Наші соціальні мережі 📢", callback_data='socmed')]
         ]
 
+        if is_admin:
+            keyboard.append([InlineKeyboardButton("🛠️ Адмін-панель", callback_data='admin_secret_panel')])
+
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         if update.callback_query:
-            await context.bot.delete_message(
-                chat_id=update.callback_query.message.chat_id,
-                message_id=update.callback_query.message.message_id
-            )
+            try:
+                await context.bot.delete_message(
+                    chat_id=update.callback_query.message.chat_id,
+                    message_id=update.callback_query.message.message_id
+                )
+            except Exception as e:
+                logger.warning(f"Failed to delete previous message in start_handler: {e}")
 
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="Вітаю! Я телеграм-бот притулку для тварин Сіріус 😊",
+            text="Вітаю! Я телеграм-бот притулку для тварин.",
             reply_markup=reply_markup
         )
-

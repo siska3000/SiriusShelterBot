@@ -1,7 +1,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from handlers.base_handler import BaseHandler
-from handlers.next_pet import NextPetHandler
+from handlers.animal_handlers.next_pet import NextPetHandler
 
 
 class PrevPetHandler(BaseHandler):
