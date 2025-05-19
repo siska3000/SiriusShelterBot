@@ -54,6 +54,6 @@ class StartHandler(BaseHandler):
 
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="Вітаю! Я телеграм-бот притулку для тварин.",
+            text="Вітаю! Я телеграм-бот притулку для тварин Сіріус 😊",
             reply_markup=reply_markup
         )
