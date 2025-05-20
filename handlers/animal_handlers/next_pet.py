@@ -70,7 +70,7 @@ class NextPetHandler(BaseHandler):
             f"Вік: {escape_markdown_v2(pet_age)}\n"
             f"Розмір: {escape_markdown_v2(pet_size)}\n"
             f"Навички: {escape_markdown_v2(pet_skills)}\n\n"
-            f"Історія:\n> {escape_markdown_v2(pet_story)}"
+            f"Історія:\n>{escape_markdown_v2(pet_story)}"
         )
 
         keyboard = [

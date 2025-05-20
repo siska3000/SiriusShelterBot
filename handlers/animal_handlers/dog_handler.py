@@ -91,7 +91,7 @@ class DogHandler(BaseHandler):
                 f"Навички та характер: {escape_markdown_v2(pet_skills_character)}",
             ]
 
-            base_caption_text = "\n".join(caption_parts) + "\n\nМоя історія:\n> "
+            base_caption_text = "\n".join(caption_parts) + "\n\nМоя історія:\n>"
             max_story_length = 1024 - len(base_caption_text) - 50
 
             pet_story_escaped = escape_markdown_v2(pet_story_original)

@@ -19,15 +19,6 @@ class AdminSecretPanelHandler(BaseHandler):
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
 
-        # Перевіряємо, чи є користувач адміністратором
-        if not BaseHandler.is_admin(user_id):
-            logger.warning(f"Non-admin user {user_id} tried to access admin panel.")
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="У вас немає прав для доступу до цієї панелі. ⛔️"
-            )
-            return
-
         logger.info(f"Admin user {user_id} accessed admin panel.")
 
         # Текст повідомлення для адмін-панелі

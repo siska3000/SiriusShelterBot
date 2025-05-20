@@ -3,10 +3,10 @@ from abc import ABC, abstractmethod
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from config import ADMIN_ID
+from config import ADMIN1_ID, ADMIN2_ID
 
 
-ADMINS = {int(ADMIN_ID)}
+ADMINS = {int(ADMIN1_ID), int(ADMIN2_ID)}
 
 
 class BaseHandler(ABC):
