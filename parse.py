@@ -72,8 +72,14 @@ initialize_db()
 # ===== ОСНОВНИЙ ЦИКЛ ПЕРЕВІРКИ =====
 while True:
     try:
-        existing_urls = load_existing_urls_from_db()
-        new_animals_count = 0
+        # --- Отримати початковий стан URL-адрес у БД ---
+        urls_in_db_at_start_of_run = load_existing_urls_from_db()
+        # --- Множина для відстеження всіх URL-адрес, знайдених на сайті під час поточного запуску ---
+        live_urls_found_this_run = set()
+        # --- Множина для URL-адрес, які вже є в БД або оброблені для вставки в цьому запуску (щоб уникнути повторного скрейпінгу деталей) ---
+        urls_to_skip_detailed_processing = set(urls_in_db_at_start_of_run)
+
+        new_animals_actually_added_count = 0
 
         # ===== НАЛАШТУВАННЯ SELENIUM =====
         options = Options()
@@ -84,8 +90,8 @@ while True:
 
         driver = webdriver.Chrome(options=options)
         wait = WebDriverWait(driver, 15)
-        conn = sqlite3.connect(DB_NAME)
-        c = conn.cursor()
+        conn_insert = sqlite3.connect(DB_NAME)
+        c_insert = conn_insert.cursor()
 
         species_urls = [
             ("Пес", "https://dogcat.com.ua/adoption?animal=1&page="),
@@ -109,10 +115,13 @@ while True:
 
                     for link_path in links_on_page:
                         full_url = link_path if link_path.startswith("http") else f"https://dogcat.com.ua{link_path}"
-                        if full_url in existing_urls:
-                            continue  # вже є
 
-                        logging.info(f"🐾 Новий профіль ({species_name}): {full_url}")
+                        live_urls_found_this_run.add(full_url)
+
+                        if full_url in urls_to_skip_detailed_processing:
+                            continue
+
+                        logging.info(f"🐾 Обробка профілю ({species_name}): {full_url}")
                         try:
                             driver.get(full_url)
                             wait.until(EC.presence_of_element_located((By.CLASS_NAME, "profile-head")))
@@ -125,7 +134,6 @@ while True:
                                 "Species": species_name
                             }
 
-                            # Ім'я, вік, стать
                             head = soup1.find('div', class_='profile-head')
                             if head:
                                 name_tag = head.find('h3')
@@ -146,7 +154,7 @@ while True:
                                     skill = clean_text(item.text)
                                     if 'розмір' in skill.lower():
                                         animal_data['Size'] = skill
-                                    elif skill.lower() != animal_data['Gender'].lower():
+                                    elif skill.lower() != animal_data['Gender'].lower():  # Уникаємо дублювання статі
                                         skills.append(skill)
                             animal_data['SkillsAndCharacter'] = ", ".join(skills)
 
@@ -157,51 +165,56 @@ while True:
                                 animal_data['MyStory'] = clean_text(history_block.get_text(separator=' ', strip=True))
 
                             # Фото
-                            photo_url = ''
+                            photo_url_on_site = ''
                             try:
                                 wait.until(EC.presence_of_element_located(
                                     (By.CSS_SELECTOR, ".swiper-slide-active img, .profile-photo img")))
                             except TimeoutException:
-                                logging.warning("⚠️ Фото не завантажено — таймаут")
+                                logging.warning(f"⚠️ Фото не завантажено для {full_url} — таймаут")
 
-                            soup1 = BeautifulSoup(driver.page_source, 'html.parser')
-                            img = soup1.select_one('.swiper-slide-active img') or soup1.select_one('.profile-photo img')
+                            # Повторно отримуємо soup після очікування фото, якщо DOM змінився
+                            soup_photo = BeautifulSoup(driver.page_source, 'html.parser')
+                            img = soup_photo.select_one('.swiper-slide-active img') or soup_photo.select_one(
+                                '.profile-photo img')
 
                             if img:
-                                photo_url = img.get('data-src-default') or img.get('src', '')
-                                if photo_url and not photo_url.startswith("http"):
-                                    photo_url = f"https://dogcat.com.ua{photo_url}"
+                                photo_url_on_site = img.get('data-src-default') or img.get('src', '')
+                                if photo_url_on_site and not photo_url_on_site.startswith("http"):
+                                    photo_url_on_site = f"https://dogcat.com.ua{photo_url_on_site}"
 
-                            if photo_url:
+                            animal_data['PhotoURL'] = ""  # За замовчуванням порожньо
+                            if photo_url_on_site:
                                 try:
-                                    # Генеруємо унікальний хеш з ProfileURL
                                     url_hash = hashlib.md5(full_url.encode('utf-8')).hexdigest()
-                                    # Використовуємо ім'я тварини та хеш для унікальності
                                     cleaned_name = "".join(
                                         c for c in animal_data['Name'] if c.isalnum() or c in (' ', '_')).replace(' ',
                                                                                                                   '_')
-                                    if not cleaned_name:
-                                        cleaned_name = "unknown_animal"  # Запасний варіант, якщо ім'я порожнє
+                                    if not cleaned_name: cleaned_name = "unknown_animal"
 
                                     filename = f"{cleaned_name}_{url_hash}.jpg"
                                     filepath = os.path.join(PHOTO_DIR, filename)
 
                                     if not os.path.exists(filepath):
-                                        response = requests.get(photo_url, timeout=10)
+                                        response = requests.get(photo_url_on_site, timeout=10)
+                                        response.raise_for_status()  # Перевірка на помилки HTTP
                                         with open(filepath, 'wb') as f:
                                             f.write(response.content)
                                         logging.info(f"🖼️ Фото збережено: {filepath}")
                                     else:
                                         logging.info(f"📂 Фото вже існує: {filepath}")
                                     animal_data['PhotoURL'] = filepath.replace("\\", "/")
-                                except Exception as e_img:
-                                    logging.warning(f"⚠️ Помилка при завантаженні фото: {e_img}")
+                                except requests.exceptions.RequestException as e_img_req:
+                                    logging.warning(
+                                        f"⚠️ Помилка запиту при завантаженні фото {photo_url_on_site}: {e_img_req}")
                                     animal_data[
-                                        'PhotoURL'] = photo_url
+                                        'PhotoURL'] = photo_url_on_site
+                                except Exception as e_img:
+                                    logging.warning(
+                                        f"⚠️ Загальна помилка при завантаженні фото {photo_url_on_site}: {e_img}")
+                                    animal_data['PhotoURL'] = photo_url_on_site
 
-                            # Збереження в базу даних
-                            # Тепер не вказуємо 'id', бо він AUTOINCREMENT
-                            c.execute('''
+                            # --- Збереження в базу даних ---
+                            c_insert.execute('''
                                 INSERT OR IGNORE INTO animals (ProfileURL, Name, Age, Gender, Size, SkillsAndCharacter, MyStory, PhotoURL, Species)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                             ''', (
@@ -209,9 +222,12 @@ while True:
                                 animal_data['Gender'], animal_data['Size'], animal_data['SkillsAndCharacter'],
                                 animal_data['MyStory'], animal_data['PhotoURL'], animal_data['Species']
                             ))
-                            conn.commit()
-                            new_animals_count += 1
-                            existing_urls.add(full_url)  # Додаємо новий URL до існуючих
+                            if c_insert.rowcount > 0:
+                                new_animals_actually_added_count += 1
+                                conn_insert.commit()
+                                urls_to_skip_detailed_processing.add(
+                                    full_url)
+                                logging.info(f"💾 Нова тваринка додана до БД: {full_url}")
 
                         except Exception as e_animal:
                             logging.error(f"❌ Помилка обробки профілю ({full_url}): {e_animal}")
@@ -223,15 +239,62 @@ while True:
                 time.sleep(0.5)
 
         driver.quit()
-        conn.close()
+        conn_insert.close()  # Закриваємо з'єднання для вставок
 
-        if new_animals_count > 0:
-            logging.info(f"✅ Додано нових тварин до '{DB_NAME}': {new_animals_count}")
+        if new_animals_actually_added_count > 0:
+            logging.info(f"✅ Успішно додано нових тварин до '{DB_NAME}': {new_animals_actually_added_count}")
         else:
-            logging.info("🔍 Нових не знайдено.")
+            logging.info("🔍 Нових тварин для додавання до БД не знайдено.")
 
+        # --- Видалення тварин, яких більше немає на сайті ---
+        urls_to_delete_from_db = urls_in_db_at_start_of_run - live_urls_found_this_run
+
+        if urls_to_delete_from_db:
+            logging.info(f"ℹ️ Знайдено {len(urls_to_delete_from_db)} тварин для видалення (більше не на сайті).")
+            conn_delete = sqlite3.connect(DB_NAME)
+            c_delete = conn_delete.cursor()
+            deleted_animals_from_db_count = 0
+
+            for url_to_remove in urls_to_delete_from_db:
+                # Спочатку отримуємо шлях до фото, щоб видалити файл
+                c_delete.execute("SELECT PhotoURL FROM animals WHERE ProfileURL = ?", (url_to_remove,))
+                row = c_delete.fetchone()
+                photo_path_to_delete = row[0] if row and row[0] else None
+
+                # Видаляємо запис з БД
+                c_delete.execute("DELETE FROM animals WHERE ProfileURL = ?", (url_to_remove,))
+                if c_delete.rowcount > 0:  # Якщо запис було фактично видалено
+                    deleted_animals_from_db_count += 1
+                    logging.info(f"🗑️ Видалено з БД: {url_to_remove}")
+
+                    # Видаляємо фото-файл, якщо він існує і є локальним шляхом
+                    if photo_path_to_delete and os.path.exists(
+                            photo_path_to_delete) and PHOTO_DIR in photo_path_to_delete:
+                        try:
+                            os.remove(photo_path_to_delete)
+                            logging.info(f"🖼️ Видалено фото-файл: {photo_path_to_delete}")
+                        except OSError as e_photo_del:
+                            logging.warning(f"⚠️ Не вдалося видалити фото-файл {photo_path_to_delete}: {e_photo_del}")
+                    elif photo_path_to_delete:
+                        logging.info(
+                            f"ℹ️ Фото-файл не видалено (або не знайдено локально, або це URL): {photo_path_to_delete}")
+                else:
+                    logging.warning(
+                        f"⚠️ Тваринка {url_to_remove} не знайдена в БД для видалення (можливо, вже видалена).")
+
+            if deleted_animals_from_db_count > 0:
+                conn_delete.commit()  # Комітимо всі видалення
+                logging.info(f"✅ Завершено видалення {deleted_animals_from_db_count} тварин з БД.")
+            else:
+                logging.info(f"ℹ️ Не було фактично видалено тварин з БД під час цієї сесії видалення.")
+            conn_delete.close()
+        else:
+            logging.info("👍 Усі тваринки з бази даних присутні на сайті або були додані щойно.")
+
+        logging.info(f"🕒 Наступна перевірка через {CHECK_INTERVAL} секунд.")
         time.sleep(CHECK_INTERVAL)
 
     except Exception as e_loop:
         logging.error(f"🔥 Помилка в головному циклі: {e_loop}")
+        logging.info(f"🕒 Спроба перезапуску через 60 секунд через помилку.")
         time.sleep(60)
