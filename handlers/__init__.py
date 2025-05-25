@@ -9,3 +9,5 @@ from .pet_handler import PetHandler
 from .socialmedia_handler import SocialMediaHandler
 from .start_handler import StartHandler
 from .support_handler import SupportHandler
+from .next_pet import NextPetHandler
+from .prev_pet import PrevPetHandler
