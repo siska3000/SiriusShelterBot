@@ -1,8 +1,8 @@
 import logging
 import re
+import sqlite3
+from datetime import datetime
 
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, \
     InlineKeyboardMarkup
 from telegram.ext import (
@@ -15,10 +15,8 @@ from telegram.ext import (
 
 from handlers.base_handler import BaseHandler
 
-# States
 EMAIL, PHONE, FIRST_NAME, LAST_NAME, COMMENT = range(5)
 
-# Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -27,20 +25,46 @@ logger = logging.getLogger(__name__)
 
 
 class GiveFamilyHandler(BaseHandler):
-    # Google Sheets config
-    CREDENTIALS_FILE = "sirius_key (2).json"
-    SPREADSHEET_ID = "1jjIDk58RjKF8SeNrm0a3Ijt8zpLa9pT2wej4053MXZk"
-    WORKSHEET_NAME = "Лист1"
-    SERVICE_ACCOUNT_EMAIL = "sheltersirius@sirius-459511.iam.gserviceaccount.com"
+    # Database config
+    DB_NAME = "sirius.db"
+
+    @staticmethod
+    def initialize_application_db():
+        """Creates the 'applications' table in the database if it doesn't exist."""
+        conn = None
+        try:
+            conn = sqlite3.connect(GiveFamilyHandler.DB_NAME)
+            c = conn.cursor()
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS applications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    pet_profile_url TEXT,
+                    email TEXT,
+                    phone TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
+                    comment TEXT
+                )
+            ''')
+            conn.commit()
+            logger.info("Successfully initialized/verified 'applications' table in the database.")
+        except sqlite3.Error as e:
+            logger.error(f"Error initializing 'applications' table: {e}")
+        finally:
+            if conn:
+                conn.close()
 
     @classmethod
     def register(cls, app, button):
+        cls.initialize_application_db()
+
         conv_handler = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(cls.start_conversation, pattern='^givefamily$')
             ],
             states={
-                EMAIL: [MessageHandler(filters.TEXT & ~filters.CONTACT, cls.get_email)],
+                EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.CONTACT, cls.get_email)],
                 PHONE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, cls.get_phone),
                     MessageHandler(filters.CONTACT, cls.get_phone)
@@ -57,6 +81,18 @@ class GiveFamilyHandler(BaseHandler):
 
     @staticmethod
     async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # Ensure previous message is deleted if it's a callback from a photo message
+        if update.callback_query:
+            try:
+                # Attempt to delete the message with the photo and inline keyboard
+                await context.bot.delete_message(
+                    chat_id=update.callback_query.message.chat_id,
+                    message_id=update.callback_query.message.message_id
+                )
+                logger.info("Previous message deleted before starting givefamily conversation.")
+            except Exception as e:
+                logger.info(f"Could not delete previous message: {e}")
+
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="📝 Щоб подарувати сім'ю тваринці, заповніть, будь ласка, коротку анкету.\nВведіть ваш емейл:"
@@ -64,85 +100,30 @@ class GiveFamilyHandler(BaseHandler):
         return EMAIL
 
     @staticmethod
-    def _get_google_sheet_client():
+    def _save_application_to_db(context: ContextTypes.DEFAULT_TYPE, user_data_list: list):
+        conn = None
         try:
-            scope = [
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive"
-            ]
-            creds = ServiceAccountCredentials.from_json_keyfile_name(
-                GiveFamilyHandler.CREDENTIALS_FILE,
-                scope
-            )
-            logger.info(f"Authenticating with service account: {creds.service_account_email}")
-            return gspread.authorize(creds)
-        except Exception as e:
-            logger.error(f"Google Sheets authentication error: {e}")
-            raise
+            conn = sqlite3.connect(GiveFamilyHandler.DB_NAME)
+            c = conn.cursor()
 
-    @staticmethod
-    def _verify_sheet_access():
-        """Verify access to the specific spreadsheet"""
-        try:
-            client = GiveFamilyHandler._get_google_sheet_client()
-            spreadsheet = client.open_by_key(GiveFamilyHandler.SPREADSHEET_ID)
-            try:
-                worksheet = spreadsheet.worksheet(GiveFamilyHandler.WORKSHEET_NAME)
-                logger.info(f"Found worksheet: {GiveFamilyHandler.WORKSHEET_NAME}")
-            except gspread.exceptions.WorksheetNotFound:
-                logger.warning(f"Worksheet '{GiveFamilyHandler.WORKSHEET_NAME}' not found, attempting to create.")
-                worksheet = spreadsheet.add_worksheet(
-                    title=GiveFamilyHandler.WORKSHEET_NAME,
-                    rows=1000,
-                    cols=20
-                )
-                # Можливо, варто додати заголовки після створення аркуша
-                headers = ["Application ID", "Pet Profile URL", "Email", "Phone", "First Name", "Last Name", "Comment"]
-                worksheet.append_row(headers)
-                logger.info(f"Created new worksheet '{GiveFamilyHandler.WORKSHEET_NAME}' with headers.")
-            return True
-        except gspread.exceptions.APIError as e:
-            logger.error(f"Sheet access verification failed: {e}")
-            raise
-
-    @staticmethod
-    def _append_to_sheet(context: ContextTypes.DEFAULT_TYPE, user_data_list: list):
-        """Appends application data including pet URL and application ID to the Google Sheet."""
-        try:
-            client = GiveFamilyHandler._get_google_sheet_client()
-            spreadsheet = client.open_by_key(GiveFamilyHandler.SPREADSHEET_ID)
-            try:
-                worksheet = spreadsheet.worksheet(GiveFamilyHandler.WORKSHEET_NAME)
-            except gspread.exceptions.WorksheetNotFound:
-                logger.warning(f"Worksheet '{GiveFamilyHandler.WORKSHEET_NAME}' not found, attempting to create.")
-                worksheet = spreadsheet.add_worksheet(
-                    title=GiveFamilyHandler.WORKSHEET_NAME,
-                    rows=1000,
-                    cols=20
-                )
-
-            all_rows = worksheet.get_all_values()
-            next_application_id = len(all_rows) + 1
-
-            # Отримуємо дані тваринки зі збережених даних користувача
+            current_timestamp = datetime.now().isoformat()
             pet_profile_url = context.user_data.get('current_pet_url', 'N/A')
-            # Ми не зберігаємо ім'я та вік у таблицю анкет за цим запитом, тільки URL.
 
-            # Формуємо повний рядок даних для запису
-            # Порядок: ID анкети, ProfileURL тваринки, email, phone, first_name, last_name, comment
-            # **ПЕРЕВІРТЕ ПОРЯДОК СТОВПЦІВ У ВАШІЙ GOOGLE ТАБЛИЦІ!**
-            full_data_row = [
-                next_application_id,  # 1. ID анкети
-                pet_profile_url,  # 2. ProfileURL тваринки
-                *user_data_list  # 3-7. Розпаковуємо список з даними користувача
-            ]
+            email, phone, first_name, last_name, comment_text = user_data_list
 
-            worksheet.append_row(full_data_row)
-            logger.info(f"Successfully wrote data to sheet: {full_data_row}")
+            c.execute('''
+                INSERT INTO applications (timestamp, pet_profile_url, email, phone, first_name, last_name, comment)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (current_timestamp, pet_profile_url, email, phone, first_name, last_name, comment_text))
+            conn.commit()
+            logger.info(f"Successfully wrote application data to SQLite DB for pet URL: {pet_profile_url}")
             return True
-        except Exception as e:
-            logger.error(f"Failed to write to sheet: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"Failed to write application to SQLite DB: {e}")
             raise
+        finally:
+            if conn:
+                conn.close()
 
     @staticmethod
     async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -164,23 +145,24 @@ class GiveFamilyHandler(BaseHandler):
 
     @staticmethod
     async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        phone = None
         if update.message.contact:
-            phone = update.message.contact.phone_number
+            phone_number = update.message.contact.phone_number
             await update.message.reply_text("Дякую! Номер отримано.", reply_markup=ReplyKeyboardRemove())
         else:
-            phone = update.message.text.strip()
+            phone_number = update.message.text.strip()
+            if not re.match(r"^\+?[0-9\s\-\(\)]{7,20}$", phone_number):  # Example regex
+                await update.message.reply_text(
+                    "❌ Номер телефону виглядає невірно. Будь ласка, спробуйте ще раз, наприклад: +380XXXXXXXXX або 0XXXXXXXXX."
+                )
+                return PHONE
+            await update.message.reply_text("Дякую! Номер отримано.", reply_markup=ReplyKeyboardRemove())
 
-        if not phone:
+        if not phone_number:
             await update.message.reply_text(
                 "❌ Будь ласка, введіть номер телефону або надішліть контакт за допомогою кнопки.")
             return PHONE
 
-        context.user_data['phone'] = phone
-
-        if not update.message.contact:
-            pass
-
+        context.user_data['phone'] = phone_number
         await update.message.reply_text("👤 Введіть ваше ім'я:")
         return FIRST_NAME
 
@@ -215,10 +197,10 @@ class GiveFamilyHandler(BaseHandler):
         pet_age = context.user_data.get('current_pet_age', 'Невідомий вік')
 
         try:
-            GiveFamilyHandler._append_to_sheet(context, user_data_list)
+            GiveFamilyHandler._save_application_to_db(context, user_data_list)
 
             summary = (
-                f"✅ Ваша анкета успішно надіслана!\n\n"
+                f"✅ Ваша анкета успішно надіслана до нашої бази даних!\n\n"
                 f"🐶 Тваринка: {pet_name}, {pet_age}\n"
                 f"📧 Емейл: {user_data_list[0]}\n"
                 f"📞 Телефон: {user_data_list[1]}\n"

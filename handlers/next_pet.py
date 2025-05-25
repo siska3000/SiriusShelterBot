@@ -1,8 +1,8 @@
-import json
 import logging
 import re
+import sqlite3
+
 import pandas as pd
-import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
@@ -10,6 +10,8 @@ from handlers.base_handler import BaseHandler
 from handlers.givefamily_handler import GiveFamilyHandler
 
 logger = logging.getLogger(__name__)
+
+DB_NAME = 'sirius.db'
 
 
 def escape_markdown_v2(text: str) -> str:
@@ -31,20 +33,39 @@ class NextPetHandler(BaseHandler):
     @staticmethod
     async def show_pet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
-            with open('google_sheet_data_updated.json', 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            df = pd.DataFrame(data)
+            conn = sqlite3.connect(DB_NAME)
+            # Fetch all necessary columns, matching those in parse.py and used by the handler
+            query = "SELECT Name, Age, Gender, Size, SkillsAndCharacter, MyStory, PhotoURL, Species, ProfileURL FROM animals"
+            df = pd.read_sql_query(query, conn)
+            conn.close()
+        except sqlite3.Error as e:
+            logging.error(f"Помилка при читанні з бази даних SQLite: {e}")
+            if update.callback_query:
+                await update.callback_query.message.reply_text("Помилка завантаження даних з бази.")
+            # Fallback for non-callback updates, though less common for this handler
+            elif update.message:
+                await update.message.reply_text("Помилка завантаження даних з бази.")
+            return
         except Exception as e:
-            logging.error(f"Помилка при читанні JSON: {e}")
-            await update.message.reply_text("Помилка завантаження даних.")
+            logging.error(f"Неочікувана помилка при завантаженні даних: {e}")
+            if update.callback_query:
+                await update.callback_query.message.reply_text("Неочікувана помилка завантаження даних.")
+            elif update.message:
+                await update.message.reply_text("Неочікувана помилка завантаження даних.")
             return
 
         species = context.user_data.get('species', 'all')
         df_filtered = df[df['Species'] == species] if species != 'all' else df
+        # Ensure essential data for display is present
         df_filtered = df_filtered.dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
 
         if df_filtered.empty:
-            await update.message.reply_text("Немає доступних тварин цього виду.")
+            message_text = "Немає доступних тварин цього виду."
+            if update.callback_query:
+                # It's better to edit the message if it's a callback to avoid multiple messages
+                await update.callback_query.edit_message_text(text=message_text)
+            elif update.message:
+                await update.message.reply_text(message_text)
             return
 
         index = context.user_data.get('pet_index', 0) % len(df_filtered)
@@ -57,7 +78,7 @@ class NextPetHandler(BaseHandler):
         pet_story = pet['MyStory']
         pet_size = pet.get('Size', 'Невідомо')
         pet_skills = pet.get('SkillsAndCharacter', 'Немає інформації')
-        pet_photo_path = pet['PhotoURL']
+        pet_photo_path = pet['PhotoURL']  # Assumes PhotoURL is like 'photos/image.jpg'
         pet_profile_url = pet.get('ProfileURL', 'Немає посилання профілю')
 
         # --- Зберігаємо дані тваринки для GiveFamilyHandler ---
@@ -82,6 +103,16 @@ class NextPetHandler(BaseHandler):
             [InlineKeyboardButton('У головне меню', callback_data='menu')],
         ]
 
+        # Delete previous message if it was a callback query to avoid clutter
+        if update.callback_query:
+            try:
+                await context.bot.delete_message(
+                    chat_id=update.callback_query.message.chat_id,
+                    message_id=update.callback_query.message.message_id
+                )
+            except Exception as e:
+                logging.info(f"Could not delete previous message (NextPetHandler): {e}")
+
         try:
             with open(pet_photo_path, 'rb') as photo:
                 await context.bot.send_photo(
@@ -92,7 +123,15 @@ class NextPetHandler(BaseHandler):
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
         except FileNotFoundError:
+            logging.error(f"Файл з фото не знайдено: {pet_photo_path}")
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=f"Файл з фото не знайдено: {pet_photo_path}",
+                text=f"На жаль, фото для {escape_markdown_v2(pet_name)} не знайдено\\. Спробуйте іншу тваринку\\.",
+                parse_mode='MarkdownV2'
+            )
+        except Exception as e:
+            logging.error(f"Помилка при відправці фото: {e}")
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="Виникла помилка при показі тваринки. Спробуйте ще раз."
             )
