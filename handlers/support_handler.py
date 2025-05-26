@@ -1,27 +1,37 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
+import re
 
-from handlers.bank_handlers import PrivatbankHandler
-from handlers.bank_handlers.monobank_handler import MonobankHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, CallbackQueryHandler
+
 from handlers.base_handler import BaseHandler
+
+
+def escape_markdown_v2(text: str) -> str:
+    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
 
 
 class SupportHandler(BaseHandler):
     @classmethod
-    def register(cls, app, button_handler):
-        button_handler.register_callback('support', cls.callback)
-        button_handler.register_callback('mono', MonobankHandler.callback)
-        button_handler.register_callback('privat', PrivatbankHandler.callback)
+    def register(cls, app, button_handler=None):
+        app.add_handler(CallbackQueryHandler(cls.callback, pattern="^support$"))
 
     @staticmethod
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        keyboard = [
-            [InlineKeyboardButton('Monobank', callback_data='mono'),
-             InlineKeyboardButton('Privat24', callback_data='privat')],
-            [InlineKeyboardButton('Назад', callback_data='menu')],
+        monobank_number = escape_markdown_v2("1234 5678 9012 3456")
+        monobank_name = escape_markdown_v2("Іван Іванов")
+        privat_number = escape_markdown_v2("9876 5432 1098 7654")
+        privat_name = escape_markdown_v2("Петро Петров")
 
-        ]
+        text = (
+            "💸 *Реквізити для підтримки:*\n\n"
+            f"• *Monobank:* `{monobank_number}`\n"
+            f"  Отримувач: {monobank_name}\n"
+            f"• *Privat24:* `{privat_number}`\n"
+            f"  Отримувач: {privat_name}\n\n"
+            "Дякуємо за вашу підтримку\\! ❤️"
+        )
 
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         if update.callback_query:
@@ -32,6 +42,7 @@ class SupportHandler(BaseHandler):
 
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="Виберіть будь ласка ваш банк яким збираєтесь оплачувати",
-            reply_markup=reply_markup
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode="MarkdownV2"
         )
