@@ -16,7 +16,7 @@ class SupportHandler(BaseHandler):
 
         text = (
             "💸 <b>Реквізити для підтримки:</b>\n\n"
-            "<a href='https://www.liqpay.ua/uk/checkout/i56164989738'>Liq Pay</a>\n\n"
+            "• <b>Privat24:</b> <code>5169 3351 0905 5497</code>\n\n"
 
             "За реквізитами: р/р ГО Притулок для тварин 'Сіріус'\n"
             "• <b>Код отримувача:</b> <code>42703881</code>\n"
@@ -25,8 +25,7 @@ class SupportHandler(BaseHandler):
             "• <b>Валюта:</b> <code>UAH</code>\n"
             "• <b>Код банку (МФО):</b> <code>305299</code>\n\n"
 
-            "• <b>Privat24:</b> <code>5169 3351 0905 5497</code>\n\n"
-
+            "<a href='https://www.liqpay.ua/uk/checkout/i56164989738'>Liq Pay</a>\n"
             "<a href='https://secure.wayforpay.com/donate/dogcat_com_ua'>WayforPay</a>\n"
             "<a href='https://bekind.ua/en/foundation?id=1499284'>BEKIND</a>\n"
             "<a href='https://www.portmone.com.ua/r3/dopomoha-tvarynam-animal-shelter-sirius'>Portmone</a>\n\n"
