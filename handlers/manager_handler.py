@@ -73,7 +73,7 @@ class ManagerHandler(BaseHandler):
                 chat_id=update.effective_chat.id,
                 text=faq_text,  # Використовуємо сформований текст FAQ
                 reply_markup=reply_markup,
-                # Видалено parse_mode='MarkdownV2' - текст буде відправлено як звичайний
+                disable_web_page_preview=True
             )
         except Exception as e:
             logger.error(f"Помилка при відправці повідомлення з FAQ: {e}")

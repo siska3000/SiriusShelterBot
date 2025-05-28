@@ -28,7 +28,7 @@ class SupportHandler(BaseHandler):
             "• <b>Privat24:</b> <code>5169 3351 0905 5497</code>\n\n"
 
             "<a href='https://secure.wayforpay.com/donate/dogcat_com_ua'>WayforPay</a>\n"
-            "<a href='https://bekind.ua/en/foundation?id=1499284'>Для Європи та США</a>\n"
+            "<a href='https://bekind.ua/en/foundation?id=1499284'>BEKIND</a>\n"
             "<a href='https://www.portmone.com.ua/r3/dopomoha-tvarynam-animal-shelter-sirius'>Portmone</a>\n\n"
             "Дякуємо за вашу підтримку! ❤️"
         )
@@ -43,5 +43,6 @@ class SupportHandler(BaseHandler):
             chat_id=update.effective_chat.id,
             text=text,
             reply_markup=reply_markup,
-            parse_mode="HTML"
+            parse_mode="HTML",
+            disable_web_page_preview=True
         )
