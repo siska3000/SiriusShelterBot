@@ -81,18 +81,6 @@ class GiveFamilyHandler(BaseHandler):
 
     @staticmethod
     async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # Ensure previous message is deleted if it's a callback from a photo message
-        if update.callback_query:
-            try:
-                # Attempt to delete the message with the photo and inline keyboard
-                await context.bot.delete_message(
-                    chat_id=update.callback_query.message.chat_id,
-                    message_id=update.callback_query.message.message_id
-                )
-                logger.info("Previous message deleted before starting givefamily conversation.")
-            except Exception as e:
-                logger.info(f"Could not delete previous message: {e}")
-
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="📝 Щоб подарувати сім'ю тваринці, заповніть, будь ласка, коротку анкету.\nВведіть ваш емейл:"

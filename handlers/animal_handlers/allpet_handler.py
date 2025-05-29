@@ -83,6 +83,7 @@ class AllpetHandler(BaseHandler):
         random_pet = df.sample(n=1).iloc[0]
         pet_name = random_pet['Name']
         pet_age = random_pet['Age']
+        pet_gender = random_pet['Gender']
         pet_story_original = random_pet['MyStory']
         pet_size = random_pet.get('Size', 'Розмір не вказано.')
         pet_skills_character = random_pet.get('SkillsAndCharacter', 'Навички та характер не описано.')
@@ -103,6 +104,7 @@ class AllpetHandler(BaseHandler):
         caption_parts = [
             f"Ім'я: {escape_markdown_v2(pet_name)}",
             f"Вік: {escape_markdown_v2(pet_age)}",
+            f"Гендер: {escape_markdown_v2(pet_gender)}",
             f"Розмір: {escape_markdown_v2(pet_size)}",
             f"Навички та характер: {escape_markdown_v2(pet_skills_character)}",
         ]
@@ -110,7 +112,10 @@ class AllpetHandler(BaseHandler):
         base_caption_text = "\n".join(caption_parts) + "\n\nМоя історія:\n>"
         max_story_length = 1024 - len(base_caption_text) - 50
 
-        pet_story_escaped = escape_markdown_v2(pet_story_original)
+        pet_story_to_display = pet_story_original if pet_story_original\
+            else 'Ця тваринка надто скромна, щоб розповідати про себе 😺'
+        pet_story_escaped = escape_markdown_v2(pet_story_to_display)
+
         truncated_story = truncate_text(pet_story_escaped, max_story_length)
         caption = base_caption_text + truncated_story
 

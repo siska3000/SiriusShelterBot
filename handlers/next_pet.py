@@ -74,6 +74,7 @@ class NextPetHandler(BaseHandler):
         pet = df_filtered.iloc[index]
 
         pet_name = pet['Name']
+        pet_gender = pet['Gender']
         pet_age = pet['Age']
         pet_story = pet['MyStory']
         pet_size = pet.get('Size', 'Невідомо')
@@ -89,10 +90,11 @@ class NextPetHandler(BaseHandler):
         caption = (
             f"Ім'я: {escape_markdown_v2(pet_name)}\n"
             f"Вік: {escape_markdown_v2(pet_age)}\n"
+            f"Гендер: {escape_markdown_v2(pet_gender)}\n"
             f"Розмір: {escape_markdown_v2(pet_size)}\n"
             f"Навички: {escape_markdown_v2(pet_skills)}\n\n"
-            f"Історія:\n>{escape_markdown_v2(pet_story)}"
-        )
+            f"Моя Історія:\n>{escape_markdown_v2(
+                pet_story if pet_story else 'Ця тваринка надто скромна, щоб розповідати про себе 😺')}")
 
         keyboard = [
             [
