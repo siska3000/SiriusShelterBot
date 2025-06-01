@@ -1,7 +1,6 @@
 import handlers.admin_handlers
 import handlers.animal_handlers
 
-from .admin_secret_panel import AdminSecretPanelHandler
 from .givefamily_handler import GiveFamilyHandler
 from .manager_handler import ManagerHandler
 from .pet_handler import PetHandler

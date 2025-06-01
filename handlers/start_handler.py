@@ -25,9 +25,6 @@ class StartHandler(BaseHandler):
 
     @staticmethod
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
-        is_admin = BaseHandler.is_admin(user_id)
-        logger.info(f"User {user_id} is admin: {is_admin}")
 
         keyboard = [
             [InlineKeyboardButton('Переглянути тварин 🐶', callback_data='watchpet')],
@@ -37,9 +34,6 @@ class StartHandler(BaseHandler):
             ],
             [InlineKeyboardButton("Наші соціальні мережі 📢", callback_data='socmed')]
         ]
-
-        if is_admin:
-            keyboard.append([InlineKeyboardButton("🛠️ Адмін-панель", callback_data='admin_secret_panel')])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
 

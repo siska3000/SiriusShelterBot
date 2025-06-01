@@ -1,7 +1,7 @@
 import logging
 import os
 import re
-import sqlite3  # Added
+import sqlite3
 
 import pandas as pd
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -10,30 +10,60 @@ from telegram.ext import ContextTypes
 from handlers.base_handler import BaseHandler
 from handlers.givefamily_handler import GiveFamilyHandler
 
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)  # Added logger instance
 
 DB_NAME = 'sirius.db'  # Added
+MAX_CAPTION_LENGTH = 1024  # ✅ ДОДАНО — ліміт Telegram на caption
 
 
 def escape_markdown_v2(text: str) -> str:
     return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
 
 
-def truncate_text(text: str, max_length: int) -> str:
-    if len(text) > max_length:
-        return text[:max_length - 3] + "..."
-    return text
+# ✅ ДОДАНО — функція, яка обрізає caption до 1024 символів
+def build_caption(pet_name, pet_age, pet_gender, pet_size, pet_skills, pet_story):
+    def esc(text):
+        return escape_markdown_v2(text if pd.notna(text) else 'Невідомо')
+
+    base_caption = (
+        f"Ім'я: {esc(pet_name)}\n"
+        f"Вік: {esc(pet_age)}\n"
+        f"Гендер: {esc(pet_gender)}\n"
+        f"Розмір: {esc(pet_size)}\n"
+        f"Навички: {esc(pet_skills)}\n\n"
+        f"Моя Історія:\n>"
+    )
+
+    remaining_length = MAX_CAPTION_LENGTH - len(base_caption)
+
+    story_text = pet_story
+    if story_text:
+        # Обрізати сирий текст до ліміту, з запасом під три крапки
+        if len(story_text) > remaining_length:
+            story_text = story_text[:remaining_length - 3] + "..."
+    else:
+        story_text = 'Ця тваринка надто скромна, щоб розповідати про себе 😺'
+
+    escaped_story = escape_markdown_v2(story_text)
+
+    return base_caption + escaped_story
 
 
 class DogHandler(BaseHandler):
     @classmethod
     def register(cls, app, button_handler):
-        button_handler.register_callback('dog', cls.callback)
+        button_handler.register_callback('allpets', cls.callback)
         button_handler.register_callback('givefamily', GiveFamilyHandler.start_conversation)
 
     @staticmethod
     async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        logging.info("DogHandler callback triggered")
+        logging.info("AllpetHandler callback triggered")
 
         try:
             conn = sqlite3.connect(DB_NAME)
@@ -56,8 +86,7 @@ class DogHandler(BaseHandler):
             )
             return
 
-        required_columns_db = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Species',
-                               'ProfileURL']  # Size, SkillsAndCharacter are handled with .get()
+        required_columns_db = ['Name', 'Age', 'PhotoURL', 'MyStory', 'Species']
         missing_columns = [col for col in required_columns_db if col not in df.columns]
 
         if missing_columns:
@@ -68,27 +97,37 @@ class DogHandler(BaseHandler):
             return
 
         df = df.dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
-        df_dogs = df[df['Species'] == 'Пес']  # for species name
-
-        if df_dogs.empty:
+        if df.empty:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="Наразі немає доступних собак для показу.",
+                text="Наразі немає доступних тварин для показу.",
             )
             return
 
-        random_pet = df_dogs.sample(n=1).iloc[0]
+        species = context.user_data.get('species', 'all')
+        df_filtered = df[df['Species'] == species] if species != 'all' else df
+        df_filtered = df_filtered.dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
 
-        pet_name = random_pet['Name']
-        pet_age = random_pet['Age']
-        pet_gender = random_pet['Gender']
-        pet_story_original = random_pet['MyStory']
-        pet_size = random_pet.get('Size', 'Розмір не вказано.')
-        pet_skills_character = random_pet.get('SkillsAndCharacter', 'Навички та характер не описано.')
-        pet_profile_url = random_pet.get('ProfileURL', 'Немає посилання профілю')
+        if df_filtered.empty:
+            message_text = "Немає доступних тварин цього виду."
+            if update.callback_query:
+                await update.callback_query.edit_message_text(text=message_text)
+            elif update.message:
+                await update.message.reply_text(message_text)
+            return
+        index = context.user_data.get('pet_index', 0) % len(df_filtered)
+        context.user_data['pet_index'] = index
 
-        # Use PhotoURL directly as it's stored like 'photos/filename.jpg'
-        pet_photo_path = random_pet['PhotoURL']
+        pet = df_filtered.iloc[index]
+
+        pet_name = pet['Name']
+        pet_gender = pet['Gender']
+        pet_age = pet['Age']
+        pet_story = pet['MyStory']
+        pet_size = pet.get('Size', 'Невідомо')
+        pet_skills = pet.get('SkillsAndCharacter', 'Немає інформації')
+        pet_photo_path = pet['PhotoURL']
+        pet_profile_url = pet.get('ProfileURL', 'Немає посилання профілю')
 
         logging.info(f"Шлях до фото: {pet_photo_path}")
         logging.info(f"Файл існує? {os.path.isfile(pet_photo_path)}")
@@ -97,42 +136,17 @@ class DogHandler(BaseHandler):
         context.user_data['current_pet_name'] = str(pet_name) if pd.notna(pet_name) else 'Невідоме ім\'я'
         context.user_data['current_pet_age'] = str(pet_age) if pd.notna(pet_age) else 'Невідомий вік'
         context.user_data['current_pet_url'] = pet_profile_url
+        context.user_data['species'] = 'Пес'
 
-        if not os.path.isfile(pet_photo_path):
-            logging.warning(f"Фото для тварини '{pet_name}' не знайдено локально: {pet_photo_path}")
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=f"Фото для тварини '{escape_markdown_v2(pet_name)}' не знайдено\\. Спробуйте іншу\\.",
-                parse_mode='MarkdownV2'
-            )
-            return
-
-        caption_parts = [
-            f"Ім'я: {escape_markdown_v2(pet_name)}",
-            f"Вік: {escape_markdown_v2(pet_age)}",
-            f"Гендер: {escape_markdown_v2(pet_gender)}",
-            f"Розмір: {escape_markdown_v2(pet_size)}",
-            f"Навички та характер: {escape_markdown_v2(pet_skills_character)}",
-        ]
-
-        base_caption_text = "\n".join(caption_parts) + "\n\nМоя історія:\n>"
-        max_story_length = 1024 - len(base_caption_text) - 50
-
-        pet_story_to_display = pet_story_original if pet_story_original\
-            else 'Ця тваринка надто скромна, щоб розповідати про себе 😺'
-        pet_story_escaped = escape_markdown_v2(pet_story_to_display)
-
-        truncated_story = truncate_text(pet_story_escaped, max_story_length)
-        caption = base_caption_text + truncated_story
-
-        if len(caption) > 1024:  # Final check
-            caption = truncate_text(caption, 1024)
+        caption = build_caption(pet_name, pet_age, pet_gender, pet_size, pet_skills,
+                                pet_story)  # 🔧 ЗМІНЕНО: використовуємо функцію
+        logging.info(f"Caption length: {len(caption)}")  # ✅ ДОДАНО: діагностика довжини caption
 
         keyboard = [
             [
-                InlineKeyboardButton('<<', callback_data='prev'),
+                InlineKeyboardButton('<<', callback_data='prev'),  # Calls PrevPetHandler -> NextPetHandler.show_pet
                 InlineKeyboardButton("Подарувати сім`ю", callback_data='givefamily'),
-                InlineKeyboardButton('>>', callback_data='next')
+                InlineKeyboardButton('>>', callback_data='next')  # Calls NextPetHandler.callback
             ],
             [InlineKeyboardButton('У головне меню', callback_data='menu')],
         ]
@@ -145,7 +159,7 @@ class DogHandler(BaseHandler):
                     message_id=update.callback_query.message.message_id
                 )
             except Exception as e:
-                logging.info(f"Не вдалося видалити повідомлення (DogHandler): {e}")
+                logging.info(f"Не вдалося видалити повідомлення (AllpetHandler): {e}")
 
         try:
             with open(pet_photo_path, 'rb') as image_file:
@@ -156,6 +170,7 @@ class DogHandler(BaseHandler):
                     parse_mode='MarkdownV2',
                     reply_markup=reply_markup
                 )
+
         except FileNotFoundError:  # Safeguard
             logging.error(f"Файл з фото не знайдено під час відправки: {pet_photo_path}")
             await context.bot.send_message(
@@ -163,8 +178,24 @@ class DogHandler(BaseHandler):
                 text=f"На жаль, фото для {escape_markdown_v2(pet_name)} не вдалося відправити\\. Спробуйте іншу тваринку\\.",
                 parse_mode='MarkdownV2'
             )
+
         except Exception as e:
-            logging.error(f"Несподівана помилка при відправці фото в DogHandler: {e}")
+            logging.error(f"Несподівана помилка в AllpetHandler.callback при відправці фото: {e}")
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
+                text="Зачекайте секунду"
+            )
+            # Якщо фото не вдалося відправити - відправляємо текстовий варіант
+            text_message = (
+                f"Не вдалося завантажити фото для {escape_markdown_v2(pet_name)}, але ось інформація:\n\n"
+                f"{caption.replace('>', '')}\n\n"
+                f"[Посилання на профіль]({pet_profile_url})" if pd.notna(pet_profile_url) else ""
+            )
+
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=text_message,
+                parse_mode='MarkdownV2',
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                disable_web_page_preview=True
             )

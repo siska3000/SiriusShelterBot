@@ -12,10 +12,40 @@ from handlers.givefamily_handler import GiveFamilyHandler
 logger = logging.getLogger(__name__)
 
 DB_NAME = 'sirius.db'
+MAX_CAPTION_LENGTH = 1024  # ✅ ДОДАНО — ліміт Telegram на caption
 
 
 def escape_markdown_v2(text: str) -> str:
     return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
+
+
+# ✅ ДОДАНО — функція, яка обрізає caption до 1024 символів
+def build_caption(pet_name, pet_age, pet_gender, pet_size, pet_skills, pet_story):
+    def esc(text):
+        return escape_markdown_v2(text if pd.notna(text) else 'Невідомо')
+
+    base_caption = (
+        f"Ім'я: {esc(pet_name)}\n"
+        f"Вік: {esc(pet_age)}\n"
+        f"Гендер: {esc(pet_gender)}\n"
+        f"Розмір: {esc(pet_size)}\n"
+        f"Навички: {esc(pet_skills)}\n\n"
+        f"Моя Історія:\n>"
+    )
+
+    remaining_length = MAX_CAPTION_LENGTH - len(base_caption)
+
+    story_text = pet_story
+    if story_text:
+        # Обрізати сирий текст до ліміту, з запасом під три крапки
+        if len(story_text) > remaining_length:
+            story_text = story_text[:remaining_length - 3] + "..."
+    else:
+        story_text = 'Ця тваринка надто скромна, щоб розповідати про себе 😺'
+
+    escaped_story = escape_markdown_v2(story_text)
+
+    return base_caption + escaped_story
 
 
 class NextPetHandler(BaseHandler):
@@ -34,7 +64,6 @@ class NextPetHandler(BaseHandler):
     async def show_pet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             conn = sqlite3.connect(DB_NAME)
-            # Fetch all necessary columns, matching those in parse.py and used by the handler
             query = "SELECT Name, Age, Gender, Size, SkillsAndCharacter, MyStory, PhotoURL, Species, ProfileURL FROM animals"
             df = pd.read_sql_query(query, conn)
             conn.close()
@@ -42,7 +71,6 @@ class NextPetHandler(BaseHandler):
             logging.error(f"Помилка при читанні з бази даних SQLite: {e}")
             if update.callback_query:
                 await update.callback_query.message.reply_text("Помилка завантаження даних з бази.")
-            # Fallback for non-callback updates, though less common for this handler
             elif update.message:
                 await update.message.reply_text("Помилка завантаження даних з бази.")
             return
@@ -56,13 +84,11 @@ class NextPetHandler(BaseHandler):
 
         species = context.user_data.get('species', 'all')
         df_filtered = df[df['Species'] == species] if species != 'all' else df
-        # Ensure essential data for display is present
         df_filtered = df_filtered.dropna(subset=["Name", "Age", "PhotoURL", "MyStory"])
 
         if df_filtered.empty:
             message_text = "Немає доступних тварин цього виду."
             if update.callback_query:
-                # It's better to edit the message if it's a callback to avoid multiple messages
                 await update.callback_query.edit_message_text(text=message_text)
             elif update.message:
                 await update.message.reply_text(message_text)
@@ -79,22 +105,16 @@ class NextPetHandler(BaseHandler):
         pet_story = pet['MyStory']
         pet_size = pet.get('Size', 'Невідомо')
         pet_skills = pet.get('SkillsAndCharacter', 'Немає інформації')
-        pet_photo_path = pet['PhotoURL']  # Assumes PhotoURL is like 'photos/image.jpg'
+        pet_photo_path = pet['PhotoURL']
         pet_profile_url = pet.get('ProfileURL', 'Немає посилання профілю')
 
-        # --- Зберігаємо дані тваринки для GiveFamilyHandler ---
         context.user_data['current_pet_name'] = str(pet_name) if pd.notna(pet_name) else 'Невідоме ім\'я'
         context.user_data['current_pet_age'] = str(pet_age) if pd.notna(pet_age) else 'Невідомий вік'
         context.user_data['current_pet_url'] = pet_profile_url
 
-        caption = (
-            f"Ім'я: {escape_markdown_v2(pet_name)}\n"
-            f"Вік: {escape_markdown_v2(pet_age)}\n"
-            f"Гендер: {escape_markdown_v2(pet_gender)}\n"
-            f"Розмір: {escape_markdown_v2(pet_size)}\n"
-            f"Навички: {escape_markdown_v2(pet_skills)}\n\n"
-            f"Моя Історія:\n>{escape_markdown_v2(
-                pet_story if pet_story else 'Ця тваринка надто скромна, щоб розповідати про себе 😺')}")
+        caption = build_caption(pet_name, pet_age, pet_gender, pet_size, pet_skills,
+                                pet_story)  # 🔧 ЗМІНЕНО: використовуємо функцію
+        logging.info(f"Caption length: {len(caption)}")  # ✅ ДОДАНО: діагностика довжини caption
 
         keyboard = [
             [
@@ -105,7 +125,6 @@ class NextPetHandler(BaseHandler):
             [InlineKeyboardButton('У головне меню', callback_data='menu')],
         ]
 
-        # Delete previous message if it was a callback query to avoid clutter
         if update.callback_query:
             try:
                 await context.bot.delete_message(
@@ -114,7 +133,7 @@ class NextPetHandler(BaseHandler):
                 )
             except Exception as e:
                 logging.info(f"Could not delete previous message (NextPetHandler): {e}")
-
+        logging.info(f"Ім'я тварини: {pet_name}")
         try:
             with open(pet_photo_path, 'rb') as photo:
                 await context.bot.send_photo(
@@ -124,6 +143,7 @@ class NextPetHandler(BaseHandler):
                     parse_mode='MarkdownV2',
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
+
         except FileNotFoundError:
             logging.error(f"Файл з фото не знайдено: {pet_photo_path}")
             await context.bot.send_message(
@@ -131,9 +151,19 @@ class NextPetHandler(BaseHandler):
                 text=f"На жаль, фото для {escape_markdown_v2(pet_name)} не знайдено\\. Спробуйте іншу тваринку\\.",
                 parse_mode='MarkdownV2'
             )
+
         except Exception as e:
             logging.error(f"Помилка при відправці фото: {e}")
+            text_message = (
+                f"Не вдалося завантажити фото для {escape_markdown_v2(pet_name)}, але ось інформація:\n\n"
+                f"{caption}\n\n"
+                f"[Посилання на профіль]({pet_profile_url})" if pd.notna(pet_profile_url) else ""
+            )
+
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="Виникла помилка при показі тваринки. Спробуйте ще раз."
+                text=text_message,
+                parse_mode='MarkdownV2',
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                disable_web_page_preview=True
             )
