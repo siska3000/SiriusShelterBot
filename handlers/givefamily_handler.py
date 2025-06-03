@@ -165,13 +165,24 @@ class GiveFamilyHandler(BaseHandler):
     async def get_last_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last_name = update.message.text.strip()
         context.user_data['last_name'] = last_name if last_name else "N/A"
-        await update.message.reply_text("💬 Залиште коментар (або напишіть 'пропустити', якщо коментаря немає):")
+
+        keyboard = [["Пропустити"]]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+
+        await update.message.reply_text(
+            "💬 Залиште коментар (або натисніть 'Пропустити', якщо коментаря немає):",
+            reply_markup=reply_markup
+        )
         return COMMENT
 
     @staticmethod
     async def get_comment(update: Update, context: ContextTypes.DEFAULT_TYPE):
         comment = update.message.text.strip()
-        context.user_data['comment'] = comment if comment.lower() not in ['пропустити', 'skip'] else "N/A"
+
+        if comment.lower() == "пропустити":
+            context.user_data['comment'] = "Немає коментаря"
+        else:
+            context.user_data['comment'] = comment
 
         user_data_list = [
             context.user_data.get('email', 'N/A'),
@@ -181,35 +192,51 @@ class GiveFamilyHandler(BaseHandler):
             context.user_data.get('comment', 'N/A'),
         ]
 
-        pet_name = context.user_data.get('current_pet_name', 'Невідоме ім\'я')
+        pet_name = context.user_data.get('current_pet_name', "Невідоме ім'я")
         pet_age = context.user_data.get('current_pet_age', 'Невідомий вік')
 
         try:
             GiveFamilyHandler._save_application_to_db(context, user_data_list)
 
+            # Improved MarkdownV2 escape function
+            def escape_markdown_v2(text: str) -> str:
+                if not text:
+                    return ""
+                escape_chars = r'_*[]()~`>#+-=|{}.!'
+                return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', str(text))
+
+            # Using raw strings for Markdown parts and f-strings for variables
             summary = (
-                f"✅ Ваша анкета успішно надіслана до нашої бази даних!\n\n"
-                f"🐶 Тваринка: {pet_name}, {pet_age}\n"
-                f"📧 Емейл: {user_data_list[0]}\n"
-                f"📞 Телефон: {user_data_list[1]}\n"
-                f"👤 Ім'я: {user_data_list[2]}\n"
-                f"👥 Прізвище: {user_data_list[3]}\n"
-                f"💬 Коментар: {user_data_list[4]}\n\n"
-                f"Дякуємо за ваш інтерес до наших хвостиків! Ми зв'яжемося з вами найближчим часом."
+                    r"✅ *Ваша анкета успішно надіслана до нашої бази даних\!*" + "\n\n"
+                                                                                 f"🐶 *Тваринка:* {escape_markdown_v2(pet_name)}, {escape_markdown_v2(pet_age)}\n"
+                                                                                 f"📧 *Емейл:* {escape_markdown_v2(user_data_list[0])}\n"
+                                                                                 f"📞 *Телефон:* {escape_markdown_v2(user_data_list[1])}\n"
+                                                                                 f"👤 *Ім'я:* {escape_markdown_v2(user_data_list[2])}\n"
+                                                                                 f"👥 *Прізвище:* {escape_markdown_v2(user_data_list[3])}\n"
+                                                                                 f"💬 *Коментар:* {escape_markdown_v2(user_data_list[4])}\n\n"
+                                                                                 r"Дякуємо за ваш інтерес до наших хвостиків\! Ми зв'яжемося з вами найближчим часом\."
             )
 
             keyboard = [
                 [InlineKeyboardButton('У головне меню', callback_data='menu')],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(summary, reply_markup=reply_markup)
+            await update.message.reply_text(
+                summary,
+                reply_markup=reply_markup,
+                parse_mode='MarkdownV2'
+            )
 
         except PermissionError as e:
             await update.message.reply_text(str(e))
         except Exception as e:
             logger.error(f"Failed to save data to sheet in get_comment: {e}")
-            await update.message.reply_text(
+            error_message = escape_markdown_v2(
                 "❌ Помилка збереження даних анкети. Будь ласка, спробуйте пізніше або зв'яжіться з нами іншим способом."
+            )
+            await update.message.reply_text(
+                error_message,
+                parse_mode='MarkdownV2'
             )
 
         context.user_data.clear()

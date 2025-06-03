@@ -25,12 +25,12 @@ def build_caption(pet_name, pet_age, pet_gender, pet_size, pet_skills, pet_story
         return escape_markdown_v2(text if pd.notna(text) else 'Невідомо')
 
     base_caption = (
-        f"Ім'я: {esc(pet_name)}\n"
-        f"Вік: {esc(pet_age)}\n"
-        f"Гендер: {esc(pet_gender)}\n"
-        f"Розмір: {esc(pet_size)}\n"
-        f"Навички: {esc(pet_skills)}\n\n"
-        f"Моя Історія:\n>"
+        f"*Ім'я:* {esc(pet_name)}\n"
+        f"*Вік:* {esc(pet_age)}\n"
+        f"*Гендер:* {esc(pet_gender)}\n"
+        f"*Розмір:* {esc(pet_size)}\n"
+        f"*Навички:* {esc(pet_skills)}\n\n"
+        f"*Моя Історія:*\n>"
     )
 
     remaining_length = MAX_CAPTION_LENGTH - len(base_caption)
