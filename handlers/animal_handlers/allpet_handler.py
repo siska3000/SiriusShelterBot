@@ -4,6 +4,7 @@ import re
 import sqlite3
 
 import pandas as pd
+import telegram.error
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
@@ -115,10 +116,7 @@ class AllpetHandler(BaseHandler):
             elif update.message:
                 await update.message.reply_text(message_text)
             return
-        index = context.user_data.get('pet_index', 0) % len(df_filtered)
-        context.user_data['pet_index'] = index
-
-        pet = df_filtered.iloc[index]
+        pet = df_filtered.sample(1).iloc[0]
 
         pet_name = pet['Name']
         pet_gender = pet['Gender']
@@ -177,6 +175,13 @@ class AllpetHandler(BaseHandler):
                 chat_id=update.effective_chat.id,
                 text=f"На жаль, фото для {escape_markdown_v2(pet_name)} не вдалося відправити\\. Спробуйте іншу тваринку\\.",
                 parse_mode='MarkdownV2'
+            )
+
+        except telegram.error.TimedOut as e:
+            logging.error(f"Несподівана помилка в AllpetHandler.callback при відправці фото: {e}")
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="Зачекайте хвилинку"
             )
 
         except Exception as e:
