@@ -144,13 +144,6 @@ class NextPetHandler(BaseHandler):
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
 
-        except FileNotFoundError:
-            logging.error(f"Файл з фото не знайдено: {pet_photo_path}")
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=f"На жаль, фото для {escape_markdown_v2(pet_name)} не знайдено\\. Спробуйте іншу тваринку\\.",
-                parse_mode='MarkdownV2'
-            )
 
         except Exception as e:
             logging.error(f"Помилка при відправці фото: {e}")

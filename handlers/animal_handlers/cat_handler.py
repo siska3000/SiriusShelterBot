@@ -169,14 +169,6 @@ class CatHandler(BaseHandler):
                     reply_markup=reply_markup
                 )
 
-        except FileNotFoundError:  # Safeguard
-            logging.error(f"Файл з фото не знайдено під час відправки: {pet_photo_path}")
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=f"На жаль, фото для {escape_markdown_v2(pet_name)} не вдалося відправити\\. Спробуйте іншу тваринку\\.",
-                parse_mode='MarkdownV2'
-            )
-
         except telegram.error.TimedOut as e:
             logging.error(f"Несподівана помилка в AllpetHandler.callback при відправці фото: {e}")
             await context.bot.send_message(
